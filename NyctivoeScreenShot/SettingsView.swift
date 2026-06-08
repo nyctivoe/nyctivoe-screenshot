@@ -27,7 +27,7 @@ struct SettingsView: View {
             }
         }
         .scenePadding()
-        .frame(minWidth: 460, minHeight: 300)
+        .frame(minWidth: 460, minHeight: 450)
         .onAppear {
             launchAtLoginManager.refresh()
         }

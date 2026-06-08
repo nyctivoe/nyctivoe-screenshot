@@ -58,6 +58,10 @@ final class PartialScreenshotOverlayController {
     }
 
     private func finish(_ selection: PartialScreenshotSelection?) {
+        if let overlayView = window?.contentView as? PartialScreenshotOverlayView {
+            overlayView.restoreCursor()
+        }
+
         window?.orderOut(nil)
         window = nil
 
@@ -82,23 +86,58 @@ private final class PartialScreenshotOverlayView: NSView {
     var screenFrame: CGRect = .zero
 
     private let minimumSelectionSize: CGFloat = 8
+    private var cursorTrackingArea: NSTrackingArea?
+    private var didPushCursor = false
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
+
+    deinit {
+        restoreCursor()
+    }
+
+    override var isOpaque: Bool {
+        false
+    }
 
     override var acceptsFirstResponder: Bool {
         true
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+
+        if window == nil {
+            restoreCursor()
+        } else {
+            updateCursorTrackingArea()
+            showCrosshairCursor()
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        updateCursorTrackingArea()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.28).setFill()
-        dirtyRect.fill()
+        NSGraphicsContext.current?.cgContext.clear(dirtyRect)
 
         guard let selectionRect else {
+            NSColor.black.withAlphaComponent(0.28).setFill()
+            dirtyRect.fill()
             return
         }
 
-        NSColor.white.withAlphaComponent(0.12).setFill()
-        selectionRect.fill()
+        drawDimmingOverlay(outside: selectionRect, in: dirtyRect)
 
         let strokePath = NSBezierPath(rect: selectionRect)
         strokePath.lineWidth = 2
@@ -109,6 +148,7 @@ private final class PartialScreenshotOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        showCrosshairCursor()
         let point = convert(event.locationInWindow, from: nil)
         dragStart = point
         dragCurrent = point
@@ -116,11 +156,13 @@ private final class PartialScreenshotOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        showCrosshairCursor()
         dragCurrent = convert(event.locationInWindow, from: nil)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        showCrosshairCursor()
         dragCurrent = convert(event.locationInWindow, from: nil)
 
         guard let selectionRect,
@@ -132,6 +174,14 @@ private final class PartialScreenshotOverlayView: NSView {
         }
 
         onFinish?(PartialScreenshotSelection(captureRect: captureRect(for: selectionRect)))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        showCrosshairCursor()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        showCrosshairCursor()
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -158,6 +208,46 @@ private final class PartialScreenshotOverlayView: NSView {
             width: abs(dragStart.x - dragCurrent.x),
             height: abs(dragStart.y - dragCurrent.y)
         ).intersection(bounds)
+    }
+
+    private func drawDimmingOverlay(outside selectionRect: CGRect, in dirtyRect: CGRect) {
+        NSColor.black.withAlphaComponent(0.28).setFill()
+
+        let overlayRects = [
+            CGRect(
+                x: bounds.minX,
+                y: bounds.minY,
+                width: bounds.width,
+                height: selectionRect.minY - bounds.minY
+            ),
+            CGRect(
+                x: bounds.minX,
+                y: selectionRect.maxY,
+                width: bounds.width,
+                height: bounds.maxY - selectionRect.maxY
+            ),
+            CGRect(
+                x: bounds.minX,
+                y: selectionRect.minY,
+                width: selectionRect.minX - bounds.minX,
+                height: selectionRect.height
+            ),
+            CGRect(
+                x: selectionRect.maxX,
+                y: selectionRect.minY,
+                width: bounds.maxX - selectionRect.maxX,
+                height: selectionRect.height
+            )
+        ]
+
+        for rect in overlayRects {
+            let visibleRect = rect.intersection(dirtyRect)
+            guard !visibleRect.isNull, !visibleRect.isEmpty else {
+                continue
+            }
+
+            visibleRect.fill()
+        }
     }
 
     private func captureRect(for selectionRect: CGRect) -> CGRect {
@@ -191,6 +281,43 @@ private final class PartialScreenshotOverlayView: NSView {
             at: CGPoint(x: labelRect.minX + 8, y: labelRect.minY + 4),
             withAttributes: attributes
         )
+    }
+
+    private func updateCursorTrackingArea() {
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .cursorUpdate, .mouseMoved, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(trackingArea)
+        cursorTrackingArea = trackingArea
+    }
+
+    private func showCrosshairCursor() {
+        if didPushCursor {
+            NSCursor.crosshair.set()
+        } else {
+            NSCursor.crosshair.push()
+            didPushCursor = true
+        }
+    }
+
+    func restoreCursor() {
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+            self.cursorTrackingArea = nil
+        }
+
+        guard didPushCursor else {
+            return
+        }
+
+        NSCursor.pop()
+        didPushCursor = false
     }
 
     private func cancel() {

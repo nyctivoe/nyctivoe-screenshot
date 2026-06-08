@@ -10,17 +10,24 @@ import SwiftUI
 
 @main
 struct NyctivoeScreenShotApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @AppStorage("hasCompletedPermissionOnboarding") private var hasCompletedPermissionOnboarding = false
     @StateObject private var controller = ScreenshotController()
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager()
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
-        WindowGroup("NyctivoeScreenShot", id: "main") {
-            ContentView(controller: controller)
+        WindowGroup("Screen Recording Permission", id: "permission") {
+            PermissionOnboardingView(
+                controller: controller,
+                hasCompletedOnboarding: $hasCompletedPermissionOnboarding
+            )
         }
         .defaultLaunchBehavior(
-            AppLaunchContext.shouldSuppressMainWindow(launchAtLoginManager: launchAtLoginManager)
+            AppLaunchContext.shouldSuppressPermissionWindow(
+                hasCompletedPermissionOnboarding: hasCompletedPermissionOnboarding,
+                launchAtLoginManager: launchAtLoginManager
+            )
             ? .suppressed
             : .automatic
         )
@@ -50,13 +57,6 @@ struct NyctivoeScreenShotApp: App {
             }
 
             Button {
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
-            } label: {
-                Label("Show Window", systemImage: "macwindow")
-            }
-
-            Button {
                 openSettings()
                 NSApp.activate(ignoringOtherApps: true)
             } label: {
@@ -79,5 +79,77 @@ struct NyctivoeScreenShotApp: App {
                 launchAtLoginManager: launchAtLoginManager
             )
         }
+    }
+}
+
+private final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+    }
+}
+
+private struct PermissionOnboardingView: View {
+    @ObservedObject var controller: ScreenshotController
+    @Binding var hasCompletedOnboarding: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("NyctivoeScreenShot")
+                        .font(.title2.weight(.semibold))
+                    Text("Screen Recording permission is required for screenshots.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            permissionStatus
+
+            HStack {
+                Button {
+                    hasCompletedOnboarding = true
+                    dismiss()
+                } label: {
+                    Text(controller.hasScreenRecordingPermission ? "Done" : "Later")
+                }
+
+                Spacer()
+
+                Button {
+                    controller.requestScreenRecordingPermission()
+                    if controller.hasScreenRecordingPermission {
+                        hasCompletedOnboarding = true
+                        dismiss()
+                    }
+                } label: {
+                    Label("Request Permission", systemImage: "lock.open")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+        .onAppear {
+            controller.refreshPermissionStatus()
+        }
+    }
+
+    private var permissionStatus: some View {
+        HStack(spacing: 10) {
+            Image(systemName: controller.hasScreenRecordingPermission ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(controller.hasScreenRecordingPermission ? .green : .orange)
+
+            Text(controller.hasScreenRecordingPermission ? "Permission is enabled." : "Click Request Permission, then enable Screen Recording in System Settings if prompted.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }

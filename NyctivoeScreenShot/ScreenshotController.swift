@@ -52,6 +52,7 @@ final class ScreenshotController: ObservableObject {
     private let partialOverlay = PartialScreenshotOverlayController()
     private let shortcutManager = GlobalShortcutManager()
     private let feedbackPerformer = ScreenshotFeedbackPerformer()
+    private let previewPanelController = ScreenshotPreviewPanelController()
     private var shortcutEventMonitor: Any?
     private var recentCapturesSyncTask: Task<Void, Never>?
 
@@ -115,8 +116,13 @@ final class ScreenshotController: ObservableObject {
             return
         }
 
+        let focusRestorer = ActiveApplicationRestorer()
+
         Task {
-            defer { finishCapture() }
+            defer {
+                finishCapture()
+                focusRestorer.restore()
+            }
 
             do {
                 let image = try await captureService.captureMainDisplay()
@@ -142,19 +148,22 @@ final class ScreenshotController: ObservableObject {
             return
         }
 
+        let focusRestorer = ActiveApplicationRestorer()
         statusMessage = "Select an area."
         partialOverlay.begin { [weak self] selection in
             guard let self else {
+                focusRestorer.restore()
                 return
             }
 
             guard let selection else {
                 statusMessage = "Partial screenshot cancelled."
+                focusRestorer.restore()
                 return
             }
 
             feedbackPerformer.perform(feedbackPreferences)
-            capturePartial(rect: selection.captureRect)
+            capturePartial(rect: selection.captureRect, focusRestorer: focusRestorer)
         }
     }
 
@@ -197,13 +206,17 @@ final class ScreenshotController: ObservableObject {
         }
     }
 
-    private func capturePartial(rect: CGRect) {
+    private func capturePartial(rect: CGRect, focusRestorer: ActiveApplicationRestorer) {
         guard beginCapture() else {
+            focusRestorer.restore()
             return
         }
 
         Task {
-            defer { finishCapture() }
+            defer {
+                finishCapture()
+                focusRestorer.restore()
+            }
 
             do {
                 try await Task.sleep(nanoseconds: 120_000_000)
@@ -246,6 +259,7 @@ final class ScreenshotController: ObservableObject {
         }
 
         storage.saveRecentCaptures(recentCaptures)
+        previewPanelController.show(record: record)
     }
 
     private func startRecentCapturesSync() {
@@ -453,5 +467,22 @@ final class ScreenshotController: ObservableObject {
         static let feedbackSound = "screenshotFeedbackSound"
         static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
         static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
+    }
+}
+
+private struct ActiveApplicationRestorer {
+    private let application: NSRunningApplication?
+
+    init() {
+        let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
+        let frontmostApplication = NSWorkspace.shared.frontmostApplication
+
+        application = frontmostApplication?.processIdentifier == currentProcessIdentifier
+            ? nil
+            : frontmostApplication
+    }
+
+    func restore() {
+        application?.activate(options: [])
     }
 }

@@ -68,6 +68,13 @@ final class LaunchAtLoginManager: ObservableObject {
 }
 
 enum AppLaunchContext {
+    static func shouldSuppressPermissionWindow(
+        hasCompletedPermissionOnboarding: Bool,
+        launchAtLoginManager: LaunchAtLoginManager
+    ) -> Bool {
+        hasCompletedPermissionOnboarding || shouldSuppressMainWindow(launchAtLoginManager: launchAtLoginManager)
+    }
+
     static func shouldSuppressMainWindow(launchAtLoginManager: LaunchAtLoginManager) -> Bool {
         launchAtLoginManager.isEnabled && parentProcessName() == "launchd"
     }
