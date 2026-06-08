@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Combine
 import Darwin
 import Foundation
 import ServiceManagement
@@ -72,7 +73,7 @@ enum AppLaunchContext {
     }
 
     private static func parentProcessName() -> String? {
-        var pathBuffer = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+        var pathBuffer = [CChar](repeating: 0, count: 4096)
         let result = proc_pidpath(getppid(), &pathBuffer, UInt32(pathBuffer.count))
         guard result > 0 else {
             return nil

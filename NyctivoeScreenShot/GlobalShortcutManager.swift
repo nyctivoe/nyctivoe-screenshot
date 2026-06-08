@@ -8,7 +8,6 @@
 import Carbon
 import Foundation
 
-@MainActor
 final class GlobalShortcutManager {
     var onFullScreenShortcut: (() -> Void)?
     var onPartialShortcut: (() -> Void)?
@@ -94,7 +93,7 @@ final class GlobalShortcutManager {
         }
 
         var hotKeyRef: EventHotKeyRef?
-        var hotKeyID = EventHotKeyID(signature: Self.signature, id: identifier)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: identifier)
         let status = RegisterEventHotKey(
             shortcut.keyCode,
             shortcut.carbonModifiers,

@@ -5,6 +5,7 @@
 //  Created by Spencer Wang on 6/8/26.
 //
 
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -26,7 +27,7 @@ struct SettingsView: View {
             }
         }
         .scenePadding()
-        .frame(width: 460, minHeight: 300)
+        .frame(minWidth: 460, minHeight: 300)
         .onAppear {
             launchAtLoginManager.refresh()
         }

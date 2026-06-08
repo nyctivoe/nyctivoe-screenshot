@@ -53,6 +53,7 @@ final class ScreenshotController: ObservableObject {
     private let shortcutManager = GlobalShortcutManager()
     private let feedbackPerformer = ScreenshotFeedbackPerformer()
     private var shortcutEventMonitor: Any?
+    private var recentCapturesSyncTask: Task<Void, Never>?
 
     var screenshotsFolderURL: URL {
         storage.folderURL
@@ -82,6 +83,8 @@ final class ScreenshotController: ObservableObject {
 
         do {
             try storage.ensureFolderExists()
+            recentCaptures = storage.loadRecentCaptures()
+            startRecentCapturesSync()
         } catch {
             statusMessage = error.localizedDescription
         }
@@ -91,6 +94,8 @@ final class ScreenshotController: ObservableObject {
         if let shortcutEventMonitor {
             NSEvent.removeMonitor(shortcutEventMonitor)
         }
+
+        recentCapturesSyncTask?.cancel()
     }
 
     func refreshPermissionStatus() {
@@ -148,6 +153,7 @@ final class ScreenshotController: ObservableObject {
                 return
             }
 
+            feedbackPerformer.perform(feedbackPreferences)
             capturePartial(rect: selection.captureRect)
         }
     }
@@ -204,7 +210,6 @@ final class ScreenshotController: ObservableObject {
                 let image = try await captureService.capture(rect: rect)
                 let record = try storage.save(image, kind: .partial)
                 remember(record)
-                feedbackPerformer.perform(feedbackPreferences)
                 statusMessage = "Saved \(record.fileName)"
             } catch {
                 handle(error)
@@ -239,6 +244,32 @@ final class ScreenshotController: ObservableObject {
         if recentCaptures.count > 8 {
             recentCaptures.removeLast(recentCaptures.count - 8)
         }
+
+        storage.saveRecentCaptures(recentCaptures)
+    }
+
+    private func startRecentCapturesSync() {
+        recentCapturesSyncTask?.cancel()
+        recentCapturesSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 15_000_000_000)
+                } catch {
+                    return
+                }
+
+                self?.syncRecentCapturesFromDisk()
+            }
+        }
+    }
+
+    private func syncRecentCapturesFromDisk() {
+        let syncedCaptures = storage.reconciledRecentCaptures()
+        guard syncedCaptures != recentCaptures else {
+            return
+        }
+
+        recentCaptures = syncedCaptures
     }
 
     private func handle(_ error: Error) {
@@ -380,13 +411,23 @@ final class ScreenshotController: ObservableObject {
             .string(forKey: UserDefaultsKey.feedbackSound)
             .flatMap(ScreenshotFeedbackSound.init(rawValue:))
         ?? defaultPreferences.sound
+        let flashIntensity = defaults
+            .string(forKey: UserDefaultsKey.feedbackFlashIntensity)
+            .flatMap(ScreenshotFeedbackFlashIntensity.init(rawValue:))
+        ?? defaultPreferences.flashIntensity
+        let flashDuration = defaults
+            .string(forKey: UserDefaultsKey.feedbackFlashDuration)
+            .flatMap(ScreenshotFeedbackFlashDuration.init(rawValue:))
+        ?? defaultPreferences.flashDuration
 
         return ScreenshotFeedbackPreferences(
             playsSound: defaults.object(forKey: UserDefaultsKey.feedbackPlaysSound) as? Bool
             ?? defaultPreferences.playsSound,
             flashesScreen: defaults.object(forKey: UserDefaultsKey.feedbackFlashesScreen) as? Bool
             ?? defaultPreferences.flashesScreen,
-            sound: sound
+            sound: sound,
+            flashIntensity: flashIntensity,
+            flashDuration: flashDuration
         )
     }
 
@@ -395,6 +436,8 @@ final class ScreenshotController: ObservableObject {
         defaults.set(preferences.playsSound, forKey: UserDefaultsKey.feedbackPlaysSound)
         defaults.set(preferences.flashesScreen, forKey: UserDefaultsKey.feedbackFlashesScreen)
         defaults.set(preferences.sound.rawValue, forKey: UserDefaultsKey.feedbackSound)
+        defaults.set(preferences.flashIntensity.rawValue, forKey: UserDefaultsKey.feedbackFlashIntensity)
+        defaults.set(preferences.flashDuration.rawValue, forKey: UserDefaultsKey.feedbackFlashDuration)
     }
 
     private enum UserDefaultsKey {
@@ -408,5 +451,7 @@ final class ScreenshotController: ObservableObject {
         static let feedbackPlaysSound = "screenshotFeedbackPlaysSound"
         static let feedbackFlashesScreen = "screenshotFeedbackFlashesScreen"
         static let feedbackSound = "screenshotFeedbackSound"
+        static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
+        static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
     }
 }

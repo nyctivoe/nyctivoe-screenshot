@@ -17,11 +17,17 @@ final class ScreenshotFeedbackPerformer {
         }
 
         if preferences.flashesScreen {
-            flashScreens()
+            flashScreens(
+                intensity: preferences.flashIntensity,
+                duration: preferences.flashDuration
+            )
         }
     }
 
-    private func flashScreens() {
+    private func flashScreens(
+        intensity: ScreenshotFeedbackFlashIntensity,
+        duration: ScreenshotFeedbackFlashDuration
+    ) {
         flashWindows.forEach { $0.orderOut(nil) }
         flashWindows.removeAll()
 
@@ -35,7 +41,7 @@ final class ScreenshotFeedbackPerformer {
                 defer: false,
                 screen: screen
             )
-            window.backgroundColor = NSColor.white.withAlphaComponent(0.32)
+            window.backgroundColor = NSColor.white.withAlphaComponent(intensity.alpha)
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.hasShadow = false
             window.ignoresMouseEvents = true
@@ -52,15 +58,17 @@ final class ScreenshotFeedbackPerformer {
                 window.animator().alphaValue = 1.0
             } completionHandler: {
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.16
+                    context.duration = duration.fadeOutDuration
                     window.animator().alphaValue = 0.0
                 } completionHandler: { [weak self, weak window] in
-                    guard let window else {
-                        return
-                    }
+                    MainActor.assumeIsolated {
+                        guard let window else {
+                            return
+                        }
 
-                    window.orderOut(nil)
-                    self?.flashWindows.removeAll { $0 === window }
+                        window.orderOut(nil)
+                        self?.flashWindows.removeAll { $0 === window }
+                    }
                 }
             }
         }

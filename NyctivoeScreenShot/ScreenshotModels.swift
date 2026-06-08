@@ -15,7 +15,7 @@ private enum KeyboardKeyCode {
     static let two: UInt32 = 19
 }
 
-enum ScreenshotKind: String {
+enum ScreenshotKind: String, Codable {
     case fullScreen = "Full Screen"
     case partial = "Partial"
 
@@ -301,24 +301,111 @@ enum ScreenshotFeedbackSound: String, CaseIterable, Identifiable {
     }
 }
 
+enum ScreenshotFeedbackFlashIntensity: String, CaseIterable, Identifiable {
+    case subtle
+    case medium
+    case strong
+
+    var id: String {
+        rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .subtle:
+            "Subtle"
+        case .medium:
+            "Medium"
+        case .strong:
+            "Strong"
+        }
+    }
+
+    var alpha: CGFloat {
+        switch self {
+        case .subtle:
+            0.22
+        case .medium:
+            0.32
+        case .strong:
+            0.46
+        }
+    }
+}
+
+enum ScreenshotFeedbackFlashDuration: String, CaseIterable, Identifiable {
+    case short
+    case medium
+    case long
+    case extraLong
+
+    var id: String {
+        rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .short:
+            "Short"
+        case .medium:
+            "Medium"
+        case .long:
+            "Long"
+        case .extraLong:
+            "Extra Long"
+        }
+    }
+
+    var fadeOutDuration: TimeInterval {
+        switch self {
+        case .short:
+            0.16
+        case .medium:
+            0.28
+        case .long:
+            0.44
+        case .extraLong:
+            0.68
+        }
+    }
+}
+
 struct ScreenshotFeedbackPreferences: Equatable {
     static let `default` = ScreenshotFeedbackPreferences(
         playsSound: true,
         flashesScreen: true,
-        sound: .glass
+        sound: .glass,
+        flashIntensity: .medium,
+        flashDuration: .long
     )
 
     var playsSound: Bool
     var flashesScreen: Bool
     var sound: ScreenshotFeedbackSound
+    var flashIntensity: ScreenshotFeedbackFlashIntensity
+    var flashDuration: ScreenshotFeedbackFlashDuration
 }
 
-struct ScreenshotRecord: Identifiable {
-    let id = UUID()
+struct ScreenshotRecord: Codable, Equatable, Identifiable {
+    let id: UUID
     let url: URL
     let createdAt: Date
     let kind: ScreenshotKind
     let pixelSize: CGSize
+
+    init(
+        id: UUID = UUID(),
+        url: URL,
+        createdAt: Date,
+        kind: ScreenshotKind,
+        pixelSize: CGSize
+    ) {
+        self.id = id
+        self.url = url
+        self.createdAt = createdAt
+        self.kind = kind
+        self.pixelSize = pixelSize
+    }
 
     var fileName: String {
         url.lastPathComponent
