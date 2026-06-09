@@ -88,7 +88,7 @@ struct ScreenshotKeyboardShortcut: Equatable {
     var modifiers: ScreenshotShortcutModifiers
 
     var isEnabled: Bool {
-        keyCode > 0 && modifiers.rawValue > 0
+        modifiers.rawValue > 0
     }
 
     var carbonModifiers: UInt32 {
@@ -124,7 +124,7 @@ struct ScreenshotKeyboardShortcut: Equatable {
 
     init?(keyCode: UInt32, carbonModifiers: UInt32) {
         let modifiers = ScreenshotShortcutModifiers(carbonModifiers: carbonModifiers)
-        guard keyCode > 0, modifiers.rawValue > 0 else {
+        guard modifiers.rawValue > 0 else {
             return nil
         }
 
@@ -384,6 +384,26 @@ struct ScreenshotFeedbackPreferences: Equatable {
     var sound: ScreenshotFeedbackSound
     var flashIntensity: ScreenshotFeedbackFlashIntensity
     var flashDuration: ScreenshotFeedbackFlashDuration
+}
+
+struct ScreenshotPreviewPreferences: Equatable {
+    static let defaultDismissalDelay: TimeInterval = 5
+    static let dismissalDelayRange: ClosedRange<TimeInterval> = 1...30
+    static let `default` = ScreenshotPreviewPreferences(dismissalDelay: defaultDismissalDelay)
+
+    var dismissalDelay: TimeInterval {
+        didSet {
+            dismissalDelay = Self.clampedDismissalDelay(dismissalDelay)
+        }
+    }
+
+    init(dismissalDelay: TimeInterval) {
+        self.dismissalDelay = Self.clampedDismissalDelay(dismissalDelay)
+    }
+
+    static func clampedDismissalDelay(_ delay: TimeInterval) -> TimeInterval {
+        min(max(delay, dismissalDelayRange.lowerBound), dismissalDelayRange.upperBound)
+    }
 }
 
 struct ScreenshotRecord: Codable, Equatable, Identifiable {

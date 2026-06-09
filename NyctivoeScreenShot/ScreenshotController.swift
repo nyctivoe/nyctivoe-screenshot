@@ -34,7 +34,7 @@ final class ScreenshotController: ObservableObject {
             }
 
             Self.saveShortcutPreferences(shortcutPreferences)
-            shortcutManager.updatePreferences(shortcutPreferences)
+            shortcutRegistrationFailures = applyShortcutPreferences(shortcutPreferences)
         }
     }
     @Published var feedbackPreferences: ScreenshotFeedbackPreferences {
@@ -44,6 +44,15 @@ final class ScreenshotController: ObservableObject {
             }
 
             Self.saveFeedbackPreferences(feedbackPreferences)
+        }
+    }
+    @Published var previewPreferences: ScreenshotPreviewPreferences {
+        didSet {
+            guard oldValue != previewPreferences else {
+                return
+            }
+
+            Self.savePreviewPreferences(previewPreferences)
         }
     }
     @Published var automationPreferences: ScreenshotAutomationPreferences {
@@ -63,6 +72,7 @@ final class ScreenshotController: ObservableObject {
     private let feedbackPerformer = ScreenshotFeedbackPerformer()
     private let previewPanelController = ScreenshotPreviewPanelController()
     private var shortcutEventMonitor: Any?
+    private var shortcutRegistrationFailures: [GlobalShortcutRegistrationFailure] = []
     private var recentCapturesSyncTask: Task<Void, Never>?
 
     var screenshotsFolderURL: URL {
@@ -77,11 +87,13 @@ final class ScreenshotController: ObservableObject {
         let savedNamingPreferences = Self.loadNamingPreferences()
         let savedShortcutPreferences = Self.loadShortcutPreferences()
         let savedFeedbackPreferences = Self.loadFeedbackPreferences()
+        let savedPreviewPreferences = Self.loadPreviewPreferences()
         let savedAutomationPreferences = Self.loadAutomationPreferences()
         storage = ScreenshotStorage(namingPreferences: savedNamingPreferences)
         namingPreferences = savedNamingPreferences
         shortcutPreferences = savedShortcutPreferences
         feedbackPreferences = savedFeedbackPreferences
+        previewPreferences = savedPreviewPreferences
         automationPreferences = savedAutomationPreferences
         hasScreenRecordingPermission = captureService.hasScreenRecordingPermission
 
@@ -91,7 +103,7 @@ final class ScreenshotController: ObservableObject {
         shortcutManager.onPartialShortcut = { [weak self] in
             self?.capturePartialScreen()
         }
-        shortcutManager.updatePreferences(savedShortcutPreferences)
+        shortcutRegistrationFailures = applyShortcutPreferences(savedShortcutPreferences)
 
         do {
             try storage.ensureFolderExists()
@@ -293,6 +305,7 @@ final class ScreenshotController: ObservableObject {
         previewPanelController.show(
             record: record,
             automationSteps: automationPreferences.automationSteps.filter { $0.isEnabled && $0.showsInPreviewMenu },
+            previewPreferences: previewPreferences,
             onRunAutomationStep: { [weak self] step, record in
                 self?.runAutomationStep(step, for: record)
             }
@@ -316,6 +329,32 @@ final class ScreenshotController: ObservableObject {
 
             self?.statusMessage = statusMessage
         }
+    }
+
+    private func applyShortcutPreferences(
+        _ preferences: ScreenshotShortcutPreferences
+    ) -> [GlobalShortcutRegistrationFailure] {
+        let failures = shortcutManager.updatePreferences(preferences)
+        if !failures.isEmpty {
+            statusMessage = Self.shortcutRegistrationFailureMessage(for: failures)
+        }
+
+        return failures
+    }
+
+    private static func shortcutRegistrationFailureMessage(
+        for failures: [GlobalShortcutRegistrationFailure]
+    ) -> String {
+        guard failures.count > 1 else {
+            guard let failure = failures.first else {
+                return "Shortcuts updated."
+            }
+
+            return "Could not register \(failure.kind.rawValue.lowercased()) shortcut \(failure.shortcut.displayText) (status \(failure.status))."
+        }
+
+        let names = failures.map { $0.kind.rawValue.lowercased() }.joined(separator: ", ")
+        return "Could not register shortcuts: \(names)."
     }
 
     private func startRecentCapturesSync() {
@@ -374,7 +413,9 @@ final class ScreenshotController: ObservableObject {
         }
 
         stopRecordingShortcut()
-        statusMessage = "Shortcut updated to \(shortcut.displayText)."
+        if shortcutRegistrationFailures.isEmpty {
+            statusMessage = "Shortcut updated to \(shortcut.displayText)."
+        }
     }
 
     private func stopRecordingShortcut() {
@@ -458,6 +499,12 @@ final class ScreenshotController: ObservableObject {
         defaultValue: ScreenshotKeyboardShortcut,
         defaults: UserDefaults
     ) -> ScreenshotKeyboardShortcut {
+        guard defaults.object(forKey: keyCodeKey) != nil,
+              defaults.object(forKey: modifiersKey) != nil
+        else {
+            return defaultValue
+        }
+
         let keyCode = UInt32(defaults.integer(forKey: keyCodeKey))
         let modifierRawValue = UInt32(defaults.integer(forKey: modifiersKey))
         let modifiers = ScreenshotShortcutModifiers(rawValue: modifierRawValue)
@@ -508,6 +555,19 @@ final class ScreenshotController: ObservableObject {
         defaults.set(preferences.sound.rawValue, forKey: UserDefaultsKey.feedbackSound)
         defaults.set(preferences.flashIntensity.rawValue, forKey: UserDefaultsKey.feedbackFlashIntensity)
         defaults.set(preferences.flashDuration.rawValue, forKey: UserDefaultsKey.feedbackFlashDuration)
+    }
+
+    private static func loadPreviewPreferences() -> ScreenshotPreviewPreferences {
+        let defaults = UserDefaults.standard
+        let defaultPreferences = ScreenshotPreviewPreferences.default
+        let dismissalDelay = defaults.object(forKey: UserDefaultsKey.previewDismissalDelay) as? TimeInterval
+            ?? defaultPreferences.dismissalDelay
+
+        return ScreenshotPreviewPreferences(dismissalDelay: dismissalDelay)
+    }
+
+    private static func savePreviewPreferences(_ preferences: ScreenshotPreviewPreferences) {
+        UserDefaults.standard.set(preferences.dismissalDelay, forKey: UserDefaultsKey.previewDismissalDelay)
     }
 
     private static func loadAutomationPreferences() -> ScreenshotAutomationPreferences {
@@ -701,6 +761,7 @@ final class ScreenshotController: ObservableObject {
         static let feedbackSound = "screenshotFeedbackSound"
         static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
         static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
+        static let previewDismissalDelay = "screenshotPreviewDismissalDelay"
         static let supabaseUploadEnabled = "screenshotSupabaseUploadEnabled"
         static let supabaseProjectURL = "screenshotSupabaseProjectURL"
         static let supabaseAnonKey = "screenshotSupabaseAnonKey"

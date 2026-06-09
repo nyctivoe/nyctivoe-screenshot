@@ -64,6 +64,17 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Preview Panel") {
+                Stepper(value: previewDismissalDelayBinding, in: ScreenshotPreviewPreferences.dismissalDelayRange, step: 1) {
+                    HStack {
+                        Text("Auto-Close After")
+                        Spacer()
+                        Text("\(Int(controller.previewPreferences.dismissalDelay))s")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Saved Name") {
                 TextField("Prefix", text: namePrefixBinding)
 
@@ -477,6 +488,14 @@ struct SettingsView: View {
             controller.feedbackPreferences.flashDuration
         } set: { value in
             controller.feedbackPreferences.flashDuration = value
+        }
+    }
+
+    private var previewDismissalDelayBinding: Binding<TimeInterval> {
+        Binding {
+            controller.previewPreferences.dismissalDelay
+        } set: { value in
+            controller.previewPreferences.dismissalDelay = value
         }
     }
 

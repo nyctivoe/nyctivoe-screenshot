@@ -60,14 +60,10 @@ final class ScreenshotFeedbackPerformer {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = duration.fadeOutDuration
                     window.animator().alphaValue = 0.0
-                } completionHandler: { [weak self, weak window] in
+                } completionHandler: {
                     MainActor.assumeIsolated {
-                        guard let window else {
-                            return
-                        }
-
                         window.orderOut(nil)
-                        self?.flashWindows.removeAll { $0 === window }
+                        self.flashWindows.removeAll { $0 === window }
                     }
                 }
             }

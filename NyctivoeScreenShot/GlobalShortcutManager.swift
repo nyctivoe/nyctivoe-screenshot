@@ -8,6 +8,12 @@
 import Carbon
 import Foundation
 
+struct GlobalShortcutRegistrationFailure: Equatable {
+    let kind: ScreenshotKind
+    let shortcut: ScreenshotKeyboardShortcut
+    let status: OSStatus
+}
+
 final class GlobalShortcutManager {
     var onFullScreenShortcut: (() -> Void)?
     var onPartialShortcut: (() -> Void)?
@@ -23,18 +29,44 @@ final class GlobalShortcutManager {
         }
     }
 
-    func updatePreferences(_ preferences: ScreenshotShortcutPreferences) {
+    @discardableResult
+    func updatePreferences(_ preferences: ScreenshotShortcutPreferences) -> [GlobalShortcutRegistrationFailure] {
         ensureEventHandlerInstalled()
         unregisterHotKeys()
 
-        fullScreenHotKey = register(
+        var failures: [GlobalShortcutRegistrationFailure] = []
+
+        let fullScreenResult = register(
             shortcut: preferences.fullScreenShortcut,
             identifier: HotKeyIdentifier.fullScreen.rawValue
         )
-        partialHotKey = register(
+        fullScreenHotKey = fullScreenResult.hotKey
+        if let status = fullScreenResult.failureStatus {
+            failures.append(
+                GlobalShortcutRegistrationFailure(
+                    kind: .fullScreen,
+                    shortcut: preferences.fullScreenShortcut,
+                    status: status
+                )
+            )
+        }
+
+        let partialResult = register(
             shortcut: preferences.partialShortcut,
             identifier: HotKeyIdentifier.partial.rawValue
         )
+        partialHotKey = partialResult.hotKey
+        if let status = partialResult.failureStatus {
+            failures.append(
+                GlobalShortcutRegistrationFailure(
+                    kind: .partial,
+                    shortcut: preferences.partialShortcut,
+                    status: status
+                )
+            )
+        }
+
+        return failures
     }
 
     private func ensureEventHandlerInstalled() {
@@ -87,9 +119,12 @@ final class GlobalShortcutManager {
         )
     }
 
-    private func register(shortcut: ScreenshotKeyboardShortcut, identifier: UInt32) -> EventHotKeyRef? {
+    private func register(
+        shortcut: ScreenshotKeyboardShortcut,
+        identifier: UInt32
+    ) -> RegistrationResult {
         guard shortcut.isEnabled else {
-            return nil
+            return RegistrationResult(hotKey: nil, failureStatus: nil)
         }
 
         var hotKeyRef: EventHotKeyRef?
@@ -103,7 +138,11 @@ final class GlobalShortcutManager {
             &hotKeyRef
         )
 
-        return status == noErr ? hotKeyRef : nil
+        guard status == noErr else {
+            return RegistrationResult(hotKey: nil, failureStatus: status)
+        }
+
+        return RegistrationResult(hotKey: hotKeyRef, failureStatus: nil)
     }
 
     private func unregisterHotKeys() {
@@ -130,6 +169,11 @@ final class GlobalShortcutManager {
     }
 
     private static let signature: OSType = 0x4E535348
+
+    private struct RegistrationResult {
+        let hotKey: EventHotKeyRef?
+        let failureStatus: OSStatus?
+    }
 
     private enum HotKeyIdentifier: UInt32 {
         case fullScreen = 1

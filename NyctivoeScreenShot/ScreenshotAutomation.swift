@@ -8,6 +8,34 @@
 import AppKit
 import Foundation
 
+private enum ScreenshotSupabaseProjectURL {
+    static func normalized(_ rawValue: String) -> String? {
+        let trimmedValue = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        guard !trimmedValue.isEmpty else {
+            return nil
+        }
+
+        let valueWithScheme = trimmedValue.contains("://") ? trimmedValue : "https://\(trimmedValue)"
+        guard var components = URLComponents(string: valueWithScheme),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host,
+              !host.isEmpty
+        else {
+            return nil
+        }
+
+        components.scheme = scheme
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return components.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}
+
 struct ScreenshotAutomationPreferences: Equatable {
     static let `default` = ScreenshotAutomationPreferences(
         supabaseProjectURL: "",
@@ -55,9 +83,7 @@ struct ScreenshotAutomationPreferences: Equatable {
     }
 
     var normalizedProjectURL: String {
-        supabaseProjectURL
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        ScreenshotSupabaseProjectURL.normalized(supabaseProjectURL) ?? ""
     }
 
     var legacySupabaseConfiguration: ScreenshotSupabaseConfiguration {
@@ -118,9 +144,7 @@ struct ScreenshotSupabaseConfiguration: Codable, Equatable {
     }
 
     var normalizedProjectURL: String {
-        projectURL
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        ScreenshotSupabaseProjectURL.normalized(projectURL) ?? ""
     }
 
     var isEmpty: Bool {
