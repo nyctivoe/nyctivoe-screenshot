@@ -320,6 +320,8 @@ enum ScreenshotAutomationEventKind: String, CaseIterable, Codable, Identifiable 
     case openInPreview
     case supabaseUpload
     case copyShareLink
+    case deleteCurrentScreenshot
+    case closePreviewPanel
 
     var id: String {
         rawValue
@@ -344,6 +346,10 @@ enum ScreenshotAutomationEventKind: String, CaseIterable, Codable, Identifiable 
             "Supabase Upload"
         case .copyShareLink:
             "Copy Share Link"
+        case .deleteCurrentScreenshot:
+            "Delete Current Screenshot"
+        case .closePreviewPanel:
+            "Close Preview Panel"
         }
     }
 
@@ -359,12 +365,16 @@ enum ScreenshotAutomationEventKind: String, CaseIterable, Codable, Identifiable 
             "icloud.and.arrow.up"
         case .copyShareLink:
             "link"
+        case .deleteCurrentScreenshot:
+            "trash"
+        case .closePreviewPanel:
+            "xmark.rectangle"
         }
     }
 
     var defaultShowsInPreviewMenu: Bool {
         switch self {
-        case .copyFile, .copyFilePath, .openInPreview:
+        case .copyFile, .copyFilePath, .openInPreview, .deleteCurrentScreenshot, .closePreviewPanel:
             true
         case .supabaseUpload, .copyShareLink:
             false
@@ -383,6 +393,10 @@ enum ScreenshotAutomationEventKind: String, CaseIterable, Codable, Identifiable 
             "Uploads the screenshot using the Supabase settings."
         case .copyShareLink:
             "Builds a custom share URL from the latest Supabase ID or public URL and copies it."
+        case .deleteCurrentScreenshot:
+            "Deletes the current screenshot file."
+        case .closePreviewPanel:
+            "Closes the screenshot preview panel."
         }
     }
 }
@@ -477,12 +491,28 @@ enum ScreenshotSupabaseDestination: String, CaseIterable, Codable, Identifiable 
     }
 }
 
+struct ScreenshotAutomationHandlers {
+    static let empty = ScreenshotAutomationHandlers(
+        deleteCurrentScreenshot: { _ in },
+        closePreviewPanel: {}
+    )
+
+    var deleteCurrentScreenshot: @MainActor (ScreenshotRecord) throws -> Void
+    var closePreviewPanel: @MainActor () -> Void
+}
+
 final class ScreenshotAutomationContext {
     let record: ScreenshotRecord
+    let handlers: ScreenshotAutomationHandlers
     var values: [String: String]
 
-    init(record: ScreenshotRecord, values: [String: String]? = nil) {
+    init(
+        record: ScreenshotRecord,
+        values: [String: String]? = nil,
+        handlers: ScreenshotAutomationHandlers = .empty
+    ) {
         self.record = record
+        self.handlers = handlers
         self.values = values ?? Self.defaultValues(for: record)
     }
 
@@ -547,9 +577,14 @@ protocol ScreenshotAutomationAction {
 
 final class ScreenshotAutomationRunner {
     var preferences: ScreenshotAutomationPreferences
+    var handlers: ScreenshotAutomationHandlers
 
-    init(preferences: ScreenshotAutomationPreferences = .default) {
+    init(
+        preferences: ScreenshotAutomationPreferences = .default,
+        handlers: ScreenshotAutomationHandlers = .empty
+    ) {
         self.preferences = preferences
+        self.handlers = handlers
     }
 
     func run(record: ScreenshotRecord) async -> ScreenshotAutomationSummary {
@@ -566,7 +601,7 @@ final class ScreenshotAutomationRunner {
         var values: [String: String]?
 
         for step in steps {
-            let context = ScreenshotAutomationContext(record: record, values: values)
+            let context = ScreenshotAutomationContext(record: record, values: values, handlers: handlers)
             for action in actions(for: step) {
                 do {
                     if let result = try await action.run(context: context) {
@@ -597,6 +632,10 @@ final class ScreenshotAutomationRunner {
                 return SupabaseScreenshotAction(title: step.title, configuration: event.supabaseConfiguration)
             case .copyShareLink:
                 return CopyShareLinkAction(title: step.title, configuration: event.shareLinkConfiguration)
+            case .deleteCurrentScreenshot:
+                return DeleteCurrentScreenshotAction(title: step.title)
+            case .closePreviewPanel:
+                return ClosePreviewPanelAction(title: step.title)
             }
         }
     }
@@ -915,6 +954,33 @@ private struct OpenInPreviewAction: ScreenshotAutomationAction {
             URL(fileURLWithPath: "/Applications/Preview.app")
         ]
         return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+}
+
+private struct DeleteCurrentScreenshotAction: ScreenshotAutomationAction {
+    let title: String
+
+    func run(context: ScreenshotAutomationContext) async throws -> ScreenshotAutomationResult? {
+        try await MainActor.run {
+            try context.handlers.deleteCurrentScreenshot(context.record)
+        }
+
+        return ScreenshotAutomationResult(
+            message: "Deleted screenshot",
+            values: ["deletedFilePath": context.record.url.path]
+        )
+    }
+}
+
+private struct ClosePreviewPanelAction: ScreenshotAutomationAction {
+    let title: String
+
+    func run(context: ScreenshotAutomationContext) async throws -> ScreenshotAutomationResult? {
+        await MainActor.run {
+            context.handlers.closePreviewPanel()
+        }
+
+        return ScreenshotAutomationResult(message: "Closed preview panel")
     }
 }
 

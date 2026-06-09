@@ -10,13 +10,16 @@ import AppKit
 @MainActor
 final class ScreenshotFeedbackPerformer {
     private var flashWindows: [NSWindow] = []
+    private var activeSound: NSSound?
 
     func perform(_ preferences: ScreenshotFeedbackPreferences) {
-        if preferences.playsSound {
-            NSSound(named: preferences.sound.soundName)?.play()
+        if preferences.playsSound, preferences.soundVolume > 0 {
+            activeSound = NSSound(named: preferences.sound.soundName)
+            activeSound?.volume = Float(preferences.soundVolume)
+            activeSound?.play()
         }
 
-        if preferences.flashesScreen {
+        if preferences.flashesScreen, preferences.flashDuration > 0 {
             flashScreens(
                 intensity: preferences.flashIntensity,
                 duration: preferences.flashDuration
@@ -26,7 +29,7 @@ final class ScreenshotFeedbackPerformer {
 
     private func flashScreens(
         intensity: ScreenshotFeedbackFlashIntensity,
-        duration: ScreenshotFeedbackFlashDuration
+        duration: TimeInterval
     ) {
         flashWindows.forEach { $0.orderOut(nil) }
         flashWindows.removeAll()
@@ -58,7 +61,7 @@ final class ScreenshotFeedbackPerformer {
                 window.animator().alphaValue = 1.0
             } completionHandler: {
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = duration.fadeOutDuration
+                    context.duration = duration
                     window.animator().alphaValue = 0.0
                 } completionHandler: {
                     MainActor.assumeIsolated {

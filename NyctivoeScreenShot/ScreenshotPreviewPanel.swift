@@ -55,7 +55,7 @@ final class ScreenshotPreviewPanelController {
         previewPanel.orderFrontRegardless()
     }
 
-    private func close() {
+    func close() {
         panel?.orderOut(nil)
         panel = nil
     }

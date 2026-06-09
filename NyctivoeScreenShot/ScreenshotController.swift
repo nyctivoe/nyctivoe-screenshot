@@ -83,6 +83,21 @@ final class ScreenshotController: ObservableObject {
         storage.previewFileName(for: .fullScreen)
     }
 
+    private var automationHandlers: ScreenshotAutomationHandlers {
+        ScreenshotAutomationHandlers(
+            deleteCurrentScreenshot: { [weak self] record in
+                guard let self else {
+                    return
+                }
+
+                try self.deleteCurrentScreenshot(record)
+            },
+            closePreviewPanel: { [weak self] in
+                self?.previewPanelController.close()
+            }
+        )
+    }
+
     init() {
         let savedNamingPreferences = Self.loadNamingPreferences()
         let savedShortcutPreferences = Self.loadShortcutPreferences()
@@ -208,6 +223,16 @@ final class ScreenshotController: ObservableObject {
         NSWorkspace.shared.open(record.url)
     }
 
+    private func deleteCurrentScreenshot(_ record: ScreenshotRecord) throws {
+        if FileManager.default.fileExists(atPath: record.url.path) {
+            try FileManager.default.removeItem(at: record.url)
+        }
+
+        recentCaptures.removeAll { $0.url == record.url }
+        storage.saveRecentCaptures(recentCaptures)
+        statusMessage = "Deleted \(record.fileName)"
+    }
+
     func runAutomationStep(_ step: ScreenshotAutomationStep, for record: ScreenshotRecord) {
         guard step.isEnabled else {
             return
@@ -215,14 +240,18 @@ final class ScreenshotController: ObservableObject {
 
         statusMessage = "Running \(step.title)..."
         Task { [weak self, preferences = automationPreferences, step, record] in
-            let runner = ScreenshotAutomationRunner(preferences: preferences)
+            guard let self else {
+                return
+            }
+
+            let runner = ScreenshotAutomationRunner(preferences: preferences, handlers: automationHandlers)
             let summary = await runner.run(record: record, step: step)
 
             guard let statusMessage = summary.statusMessage else {
                 return
             }
 
-            self?.statusMessage = statusMessage
+            self.statusMessage = statusMessage
         }
     }
 
@@ -320,14 +349,18 @@ final class ScreenshotController: ObservableObject {
 
         statusMessage = "Saved \(record.fileName). Running automations..."
         Task { [weak self, preferences, record] in
-            let runner = ScreenshotAutomationRunner(preferences: preferences)
+            guard let self else {
+                return
+            }
+
+            let runner = ScreenshotAutomationRunner(preferences: preferences, handlers: automationHandlers)
             let summary = await runner.run(record: record)
 
             guard let statusMessage = summary.statusMessage else {
                 return
             }
 
-            self?.statusMessage = statusMessage
+            self.statusMessage = statusMessage
         }
     }
 
@@ -532,10 +565,16 @@ final class ScreenshotController: ObservableObject {
             .string(forKey: UserDefaultsKey.feedbackFlashIntensity)
             .flatMap(ScreenshotFeedbackFlashIntensity.init(rawValue:))
         ?? defaultPreferences.flashIntensity
-        let flashDuration = defaults
-            .string(forKey: UserDefaultsKey.feedbackFlashDuration)
-            .flatMap(ScreenshotFeedbackFlashDuration.init(rawValue:))
-        ?? defaultPreferences.flashDuration
+        let flashDuration: TimeInterval
+        if let storedDuration = defaults.object(forKey: UserDefaultsKey.feedbackFlashDuration) as? TimeInterval {
+            flashDuration = storedDuration
+        } else {
+            flashDuration = defaults
+                .string(forKey: UserDefaultsKey.feedbackFlashDuration)
+                .flatMap(ScreenshotFeedbackFlashDuration.init(rawValue:))?
+                .fadeOutDuration
+            ?? defaultPreferences.flashDuration
+        }
 
         return ScreenshotFeedbackPreferences(
             playsSound: defaults.object(forKey: UserDefaultsKey.feedbackPlaysSound) as? Bool
@@ -543,6 +582,8 @@ final class ScreenshotController: ObservableObject {
             flashesScreen: defaults.object(forKey: UserDefaultsKey.feedbackFlashesScreen) as? Bool
             ?? defaultPreferences.flashesScreen,
             sound: sound,
+            soundVolume: defaults.object(forKey: UserDefaultsKey.feedbackSoundVolume) as? Double
+            ?? defaultPreferences.soundVolume,
             flashIntensity: flashIntensity,
             flashDuration: flashDuration
         )
@@ -553,8 +594,9 @@ final class ScreenshotController: ObservableObject {
         defaults.set(preferences.playsSound, forKey: UserDefaultsKey.feedbackPlaysSound)
         defaults.set(preferences.flashesScreen, forKey: UserDefaultsKey.feedbackFlashesScreen)
         defaults.set(preferences.sound.rawValue, forKey: UserDefaultsKey.feedbackSound)
+        defaults.set(preferences.soundVolume, forKey: UserDefaultsKey.feedbackSoundVolume)
         defaults.set(preferences.flashIntensity.rawValue, forKey: UserDefaultsKey.feedbackFlashIntensity)
-        defaults.set(preferences.flashDuration.rawValue, forKey: UserDefaultsKey.feedbackFlashDuration)
+        defaults.set(preferences.flashDuration, forKey: UserDefaultsKey.feedbackFlashDuration)
     }
 
     private static func loadPreviewPreferences() -> ScreenshotPreviewPreferences {
@@ -700,7 +742,7 @@ final class ScreenshotController: ObservableObject {
                             urlTemplate: shareLinkTemplate(from: preferences.shareLinkDomain)
                         )
                     }
-                case .copyFile, .copyFilePath, .openInPreview:
+                case .copyFile, .copyFilePath, .openInPreview, .deleteCurrentScreenshot, .closePreviewPanel:
                     break
                 }
             }
@@ -759,6 +801,7 @@ final class ScreenshotController: ObservableObject {
         static let feedbackPlaysSound = "screenshotFeedbackPlaysSound"
         static let feedbackFlashesScreen = "screenshotFeedbackFlashesScreen"
         static let feedbackSound = "screenshotFeedbackSound"
+        static let feedbackSoundVolume = "screenshotFeedbackSoundVolume"
         static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
         static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
         static let previewDismissalDelay = "screenshotPreviewDismissalDelay"

@@ -69,7 +69,15 @@ struct SettingsView: View {
                     HStack {
                         Text("Auto-Close After")
                         Spacer()
-                        Text("\(Int(controller.previewPreferences.dismissalDelay))s")
+                        TextField(
+                            "Seconds",
+                            value: previewDismissalDelayBinding,
+                            format: .number.precision(.fractionLength(0))
+                        )
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 48)
+
+                        Text("s")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -162,6 +170,21 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!controller.feedbackPreferences.playsSound)
+
+                HStack {
+                    Text("Volume")
+                    Slider(value: feedbackSoundVolumeBinding, in: ScreenshotFeedbackPreferences.volumeRange) {
+                        Text("Volume")
+                    } minimumValueLabel: {
+                        Image(systemName: "speaker.slash")
+                    } maximumValueLabel: {
+                        Image(systemName: "speaker.wave.3")
+                    }
+                    Text(controller.feedbackPreferences.soundVolume, format: .percent.precision(.fractionLength(0)))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+                .disabled(!controller.feedbackPreferences.playsSound)
             }
 
             Section("Blink") {
@@ -174,10 +197,18 @@ struct SettingsView: View {
                 }
                 .disabled(!controller.feedbackPreferences.flashesScreen)
 
-                Picker("Duration", selection: flashDurationBinding) {
-                    ForEach(ScreenshotFeedbackFlashDuration.allCases) { duration in
-                        Text(duration.label).tag(duration)
+                HStack {
+                    Text("Duration")
+                    Slider(value: flashDurationBinding, in: ScreenshotFeedbackPreferences.flashDurationRange) {
+                        Text("Duration")
+                    } minimumValueLabel: {
+                        Text("0ms")
+                    } maximumValueLabel: {
+                        Text("1000ms")
                     }
+                    Text("\(Int((controller.feedbackPreferences.flashDuration * 1000).rounded()))ms")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 58, alignment: .trailing)
                 }
                 .disabled(!controller.feedbackPreferences.flashesScreen)
             }
@@ -316,7 +347,7 @@ struct SettingsView: View {
             supabaseEventConfiguration(stepIndex: stepIndex, eventIndex: eventIndex)
         case .copyShareLink:
             shareLinkEventConfiguration(stepIndex: stepIndex, eventIndex: eventIndex)
-        case .copyFile, .copyFilePath, .openInPreview:
+        case .copyFile, .copyFilePath, .openInPreview, .deleteCurrentScreenshot, .closePreviewPanel:
             EmptyView()
         }
     }
@@ -475,6 +506,14 @@ struct SettingsView: View {
         }
     }
 
+    private var feedbackSoundVolumeBinding: Binding<Double> {
+        Binding {
+            controller.feedbackPreferences.soundVolume
+        } set: { value in
+            controller.feedbackPreferences.soundVolume = value
+        }
+    }
+
     private var flashIntensityBinding: Binding<ScreenshotFeedbackFlashIntensity> {
         Binding {
             controller.feedbackPreferences.flashIntensity
@@ -483,7 +522,7 @@ struct SettingsView: View {
         }
     }
 
-    private var flashDurationBinding: Binding<ScreenshotFeedbackFlashDuration> {
+    private var flashDurationBinding: Binding<TimeInterval> {
         Binding {
             controller.feedbackPreferences.flashDuration
         } set: { value in

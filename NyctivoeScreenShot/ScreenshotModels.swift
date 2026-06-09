@@ -371,19 +371,57 @@ enum ScreenshotFeedbackFlashDuration: String, CaseIterable, Identifiable {
 }
 
 struct ScreenshotFeedbackPreferences: Equatable {
+    static let volumeRange: ClosedRange<Double> = 0...1
+    static let flashDurationRange: ClosedRange<TimeInterval> = 0...1
+    static let defaultSoundVolume = 0.5
+    static let defaultFlashDuration: TimeInterval = ScreenshotFeedbackFlashDuration.long.fadeOutDuration
     static let `default` = ScreenshotFeedbackPreferences(
         playsSound: true,
         flashesScreen: true,
         sound: .glass,
+        soundVolume: defaultSoundVolume,
         flashIntensity: .medium,
-        flashDuration: .long
+        flashDuration: defaultFlashDuration
     )
 
     var playsSound: Bool
     var flashesScreen: Bool
     var sound: ScreenshotFeedbackSound
+    var soundVolume: Double {
+        didSet {
+            soundVolume = Self.clampedSoundVolume(soundVolume)
+        }
+    }
     var flashIntensity: ScreenshotFeedbackFlashIntensity
-    var flashDuration: ScreenshotFeedbackFlashDuration
+    var flashDuration: TimeInterval {
+        didSet {
+            flashDuration = Self.clampedFlashDuration(flashDuration)
+        }
+    }
+
+    init(
+        playsSound: Bool,
+        flashesScreen: Bool,
+        sound: ScreenshotFeedbackSound,
+        soundVolume: Double,
+        flashIntensity: ScreenshotFeedbackFlashIntensity,
+        flashDuration: TimeInterval
+    ) {
+        self.playsSound = playsSound
+        self.flashesScreen = flashesScreen
+        self.sound = sound
+        self.soundVolume = Self.clampedSoundVolume(soundVolume)
+        self.flashIntensity = flashIntensity
+        self.flashDuration = Self.clampedFlashDuration(flashDuration)
+    }
+
+    private static func clampedSoundVolume(_ value: Double) -> Double {
+        min(max(value, volumeRange.lowerBound), volumeRange.upperBound)
+    }
+
+    private static func clampedFlashDuration(_ duration: TimeInterval) -> TimeInterval {
+        min(max(duration, flashDurationRange.lowerBound), flashDurationRange.upperBound)
+    }
 }
 
 struct ScreenshotPreviewPreferences: Equatable {
