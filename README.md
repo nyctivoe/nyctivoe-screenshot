@@ -9,4 +9,4 @@ More features will for sure be added...
 
 ---
 
-P.S. This is my first time making an Macos Application, so there are probably some bad practices. :(
+P.S. This is my first time making a MacOS Application, so there are probably some bad practices. :(
