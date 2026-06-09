@@ -26,6 +26,7 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(minWidth: 600, minHeight: 440)
+        .nyctivoeWindowBackground()
         .onAppear {
             controller.refreshPermissionStatus()
         }
@@ -35,7 +36,7 @@ struct ContentView: View {
         HStack(spacing: 12) {
             Image(systemName: "camera.viewfinder")
                 .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("NyctivoeScreenShot")
@@ -62,7 +63,7 @@ struct ContentView: View {
         .foregroundStyle(controller.hasScreenRecordingPermission ? .green : .orange)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(.quaternary, in: Capsule())
+        .nyctivoeGlassEffect(in: Capsule())
     }
 
     private var captureActions: some View {
@@ -73,7 +74,7 @@ struct ContentView: View {
                 Label("Full Screen", systemImage: "display")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .nyctivoeGlassButtonStyle(prominent: true)
 
             Button {
                 controller.capturePartialScreen()
@@ -81,7 +82,7 @@ struct ContentView: View {
                 Label("Partial", systemImage: "crop")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .nyctivoeGlassButtonStyle()
         }
         .controlSize(.large)
         .disabled(controller.isCapturing)
@@ -104,7 +105,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .nyctivoeGlassEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var recentCaptures: some View {
@@ -135,6 +136,7 @@ struct ContentView: View {
             } label: {
                 Label("Open Folder", systemImage: "folder")
             }
+            .nyctivoeGlassButtonStyle()
 
             Spacer()
 
@@ -144,6 +146,7 @@ struct ContentView: View {
                 } label: {
                     Label("Request Permission", systemImage: "lock.open")
                 }
+                .nyctivoeGlassButtonStyle(prominent: true)
             }
         }
     }
@@ -158,7 +161,7 @@ private struct CaptureRow: View {
         HStack(spacing: 12) {
             Image(systemName: record.kind == .fullScreen ? "display" : "crop")
                 .font(.title3)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -180,6 +183,7 @@ private struct CaptureRow: View {
                 Label("Open", systemImage: "arrow.up.right.square")
                     .labelStyle(.iconOnly)
             }
+            .nyctivoeGlassButtonStyle()
             .help("Open")
 
             Button {
@@ -188,10 +192,11 @@ private struct CaptureRow: View {
                 Label("Reveal", systemImage: "magnifyingglass")
                     .labelStyle(.iconOnly)
             }
+            .nyctivoeGlassButtonStyle()
             .help("Reveal")
         }
         .padding(10)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+        .nyctivoeGlassEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

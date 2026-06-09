@@ -19,6 +19,7 @@ final class ScreenshotPreviewPanelController {
     func show(
         record: ScreenshotRecord,
         automationSteps: [ScreenshotAutomationStep],
+        previewPreferences: ScreenshotPreviewPreferences,
         onRunAutomationStep: @escaping (ScreenshotAutomationStep, ScreenshotRecord) -> Void
     ) {
         let previewSize = size(for: record)
@@ -34,6 +35,7 @@ final class ScreenshotPreviewPanelController {
                 previewSize: previewSize,
                 record: record,
                 automationSteps: automationSteps,
+                previewPreferences: previewPreferences,
                 onRunAutomationStep: onRunAutomationStep,
                 onClose: { [weak self] in
                     self?.close()
@@ -123,11 +125,13 @@ private struct ScreenshotPreviewPanelView: View {
     let previewSize: CGSize
     let record: ScreenshotRecord
     let automationSteps: [ScreenshotAutomationStep]
+    let previewPreferences: ScreenshotPreviewPreferences
     let onRunAutomationStep: (ScreenshotAutomationStep, ScreenshotRecord) -> Void
     let onClose: () -> Void
 
     private let shadowOverflow: CGFloat = 18
 
+    @State private var autoCloseTask: Task<Void, Never>?
     @State private var isHoveringPanel = false
     @State private var isShowingActions = false
 
@@ -144,9 +148,16 @@ private struct ScreenshotPreviewPanelView: View {
             .padding(.bottom, shadowOverflow)
         }
         .onDrag {
-            NSItemProvider(contentsOf: record.url) ?? NSItemProvider(object: record.url as NSURL)
+            resetAutoCloseTimer()
+            return NSItemProvider(contentsOf: record.url) ?? NSItemProvider(object: record.url as NSURL)
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                resetAutoCloseTimer()
+            }
+        )
         .onHover { isHovering in
+            resetAutoCloseTimer()
             withAnimation(.easeOut(duration: 0.16)) {
                 isHoveringPanel = isHovering
                 if !isHovering {
@@ -154,25 +165,48 @@ private struct ScreenshotPreviewPanelView: View {
                 }
             }
         }
+        .onAppear(perform: resetAutoCloseTimer)
+        .onDisappear {
+            autoCloseTask?.cancel()
+            autoCloseTask = nil
+        }
+    }
+
+    private func resetAutoCloseTimer() {
+        autoCloseTask?.cancel()
+
+        let nanoseconds = UInt64(previewPreferences.dismissalDelay * 1_000_000_000)
+        autoCloseTask = Task { [onClose] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                onClose()
+            }
+        }
     }
 
     private var visiblePanel: some View {
         ZStack {
-            panelBackground
-
             imagePreview
                 .padding(14)
         }
-        .overlay(panelOutline)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.34), radius: 3, x: 0, y: 1)
-        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
-        .shadow(color: .black.opacity(0.08), radius: 22, x: 0, y: 11)
+        .nyctivoeGlassBackgroundEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 14)
     }
 
     private var imagePreview: some View {
-        RoundedRectangle(cornerRadius: 7)
-            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.72))
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.62))
             .overlay {
                 if let image = NSImage(contentsOf: record.url) {
                     Image(nsImage: image)
@@ -186,8 +220,8 @@ private struct ScreenshotPreviewPanelView: View {
                 }
             }
             .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(.white.opacity(0.22), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(.separator.opacity(0.32), lineWidth: 1)
             )
             .contentShape(Rectangle())
     }
@@ -203,6 +237,7 @@ private struct ScreenshotPreviewPanelView: View {
 
     private var actionMenu: some View {
         Button {
+            resetAutoCloseTimer()
             withAnimation(.easeOut(duration: 0.16)) {
                 isShowingActions.toggle()
             }
@@ -226,6 +261,7 @@ private struct ScreenshotPreviewPanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(automationSteps) { step in
                     Button {
+                        resetAutoCloseTimer()
                         onRunAutomationStep(step, record)
                         isShowingActions = false
                     } label: {
@@ -238,41 +274,23 @@ private struct ScreenshotPreviewPanelView: View {
             .font(.system(size: 12, weight: .medium))
             .padding(7)
             .fixedSize(horizontal: true, vertical: true)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.white.opacity(0.32), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 8)
+            .nyctivoeGlassBackgroundEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 8)
             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
         }
     }
 
     private var closeButton: some View {
-        Button(action: onClose) {
+        Button {
+            resetAutoCloseTimer()
+            onClose()
+        } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 22, weight: .bold))
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(ScreenshotPreviewIconButtonStyle())
         .help("Close")
-    }
-
-    private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .fill(.ultraThinMaterial)
-    }
-
-    private var panelOutline: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(
-                LinearGradient(
-                    colors: [.white.opacity(0.58), .white.opacity(0.18), .black.opacity(0.18)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 1
-            )
     }
 
 }
@@ -289,14 +307,10 @@ private struct ScreenshotPreviewIconButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .foregroundStyle(.primary)
-                .background(.regularMaterial, in: Circle())
+                .nyctivoeGlassEffect(in: Circle())
                 .overlay(
                     Circle()
                         .fill(backgroundColor)
-                )
-                .overlay(
-                    Circle()
-                        .stroke(.white.opacity(isHovering || configuration.isPressed ? 0.42 : 0.28), lineWidth: 1)
                 )
                 .contentShape(Circle())
                 .onHover { isHovering = $0 }
@@ -306,10 +320,10 @@ private struct ScreenshotPreviewIconButtonStyle: ButtonStyle {
 
         private var backgroundColor: Color {
             if configuration.isPressed {
-                return Color.gray.opacity(0.34)
+                return Color.primary.opacity(0.14)
             }
 
-            return isHovering ? Color.gray.opacity(0.2) : Color.clear
+            return isHovering ? Color.primary.opacity(0.08) : Color.clear
         }
     }
 }
@@ -329,10 +343,10 @@ private struct ScreenshotPreviewMenuButtonStyle: ButtonStyle {
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(backgroundColor)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .onHover { isHovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: isHovering)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
@@ -340,10 +354,10 @@ private struct ScreenshotPreviewMenuButtonStyle: ButtonStyle {
 
         private var backgroundColor: Color {
             if configuration.isPressed {
-                return Color.gray.opacity(0.28)
+                return Color.primary.opacity(0.16)
             }
 
-            return isHovering ? Color.gray.opacity(0.18) : Color.clear
+            return isHovering ? Color.primary.opacity(0.1) : Color.clear
         }
     }
 }

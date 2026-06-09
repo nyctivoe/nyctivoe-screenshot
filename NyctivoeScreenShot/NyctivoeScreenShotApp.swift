@@ -78,6 +78,7 @@ struct NyctivoeScreenShotApp: App {
                 controller: controller,
                 launchAtLoginManager: launchAtLoginManager
             )
+            .nyctivoeWindowBackground()
         }
     }
 }
@@ -116,7 +117,7 @@ private struct PermissionOnboardingView: View {
             HStack(spacing: 12) {
                 Image(systemName: "camera.viewfinder")
                     .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.tint)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("NyctivoeScreenShot")
@@ -135,6 +136,7 @@ private struct PermissionOnboardingView: View {
                 } label: {
                     Text(controller.hasScreenRecordingPermission ? "Done" : "Later")
                 }
+                .nyctivoeGlassButtonStyle()
 
                 Spacer()
 
@@ -147,11 +149,12 @@ private struct PermissionOnboardingView: View {
                 } label: {
                     Label("Request Permission", systemImage: "lock.open")
                 }
-                .buttonStyle(.borderedProminent)
+                .nyctivoeGlassButtonStyle(prominent: true)
             }
         }
         .padding(24)
         .frame(width: 460)
+        .nyctivoeWindowBackground()
         .onAppear {
             controller.refreshPermissionStatus()
         }
@@ -168,6 +171,6 @@ private struct PermissionOnboardingView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .nyctivoeGlassEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
