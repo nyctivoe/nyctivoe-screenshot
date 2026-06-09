@@ -46,6 +46,15 @@ final class ScreenshotController: ObservableObject {
             Self.saveFeedbackPreferences(feedbackPreferences)
         }
     }
+    @Published var automationPreferences: ScreenshotAutomationPreferences {
+        didSet {
+            guard oldValue != automationPreferences else {
+                return
+            }
+
+            Self.saveAutomationPreferences(automationPreferences)
+        }
+    }
 
     private let captureService = ScreenshotCaptureService()
     private let storage: ScreenshotStorage
@@ -68,10 +77,12 @@ final class ScreenshotController: ObservableObject {
         let savedNamingPreferences = Self.loadNamingPreferences()
         let savedShortcutPreferences = Self.loadShortcutPreferences()
         let savedFeedbackPreferences = Self.loadFeedbackPreferences()
+        let savedAutomationPreferences = Self.loadAutomationPreferences()
         storage = ScreenshotStorage(namingPreferences: savedNamingPreferences)
         namingPreferences = savedNamingPreferences
         shortcutPreferences = savedShortcutPreferences
         feedbackPreferences = savedFeedbackPreferences
+        automationPreferences = savedAutomationPreferences
         hasScreenRecordingPermission = captureService.hasScreenRecordingPermission
 
         shortcutManager.onFullScreenShortcut = { [weak self] in
@@ -130,6 +141,7 @@ final class ScreenshotController: ObservableObject {
                 remember(record)
                 feedbackPerformer.perform(feedbackPreferences)
                 statusMessage = "Saved \(record.fileName)"
+                runAutomations(for: record)
             } catch {
                 handle(error)
             }
@@ -184,6 +196,24 @@ final class ScreenshotController: ObservableObject {
         NSWorkspace.shared.open(record.url)
     }
 
+    func runAutomationStep(_ step: ScreenshotAutomationStep, for record: ScreenshotRecord) {
+        guard step.isEnabled else {
+            return
+        }
+
+        statusMessage = "Running \(step.title)..."
+        Task { [weak self, preferences = automationPreferences, step, record] in
+            let runner = ScreenshotAutomationRunner(preferences: preferences)
+            let summary = await runner.run(record: record, step: step)
+
+            guard let statusMessage = summary.statusMessage else {
+                return
+            }
+
+            self?.statusMessage = statusMessage
+        }
+    }
+
     func resetNamingPreferences() {
         namingPreferences = .default
     }
@@ -224,6 +254,7 @@ final class ScreenshotController: ObservableObject {
                 let record = try storage.save(image, kind: .partial)
                 remember(record)
                 statusMessage = "Saved \(record.fileName)"
+                runAutomations(for: record)
             } catch {
                 handle(error)
             }
@@ -259,7 +290,32 @@ final class ScreenshotController: ObservableObject {
         }
 
         storage.saveRecentCaptures(recentCaptures)
-        previewPanelController.show(record: record)
+        previewPanelController.show(
+            record: record,
+            automationSteps: automationPreferences.automationSteps.filter { $0.isEnabled && $0.showsInPreviewMenu },
+            onRunAutomationStep: { [weak self] step, record in
+                self?.runAutomationStep(step, for: record)
+            }
+        )
+    }
+
+    private func runAutomations(for record: ScreenshotRecord) {
+        let preferences = automationPreferences
+        guard preferences.automationSteps.contains(where: { $0.isEnabled && $0.runsAfterCapture }) else {
+            return
+        }
+
+        statusMessage = "Saved \(record.fileName). Running automations..."
+        Task { [weak self, preferences, record] in
+            let runner = ScreenshotAutomationRunner(preferences: preferences)
+            let summary = await runner.run(record: record)
+
+            guard let statusMessage = summary.statusMessage else {
+                return
+            }
+
+            self?.statusMessage = statusMessage
+        }
     }
 
     private func startRecentCapturesSync() {
@@ -454,6 +510,184 @@ final class ScreenshotController: ObservableObject {
         defaults.set(preferences.flashDuration.rawValue, forKey: UserDefaultsKey.feedbackFlashDuration)
     }
 
+    private static func loadAutomationPreferences() -> ScreenshotAutomationPreferences {
+        let defaults = UserDefaults.standard
+        let defaultPreferences = ScreenshotAutomationPreferences.default
+
+        var preferences = ScreenshotAutomationPreferences(
+            supabaseProjectURL: defaults.string(forKey: UserDefaultsKey.supabaseProjectURL)
+            ?? defaultPreferences.supabaseProjectURL,
+            supabaseAnonKey: defaults.string(forKey: UserDefaultsKey.supabaseAnonKey)
+            ?? defaultPreferences.supabaseAnonKey,
+            supabaseEmail: defaults.string(forKey: UserDefaultsKey.supabaseEmail)
+            ?? defaultPreferences.supabaseEmail,
+            supabasePassword: defaults.string(forKey: UserDefaultsKey.supabasePassword)
+            ?? defaultPreferences.supabasePassword,
+            supabaseDestination: defaults
+                .string(forKey: UserDefaultsKey.supabaseDestination)
+                .flatMap(ScreenshotSupabaseDestination.init(rawValue:))
+            ?? defaultPreferences.supabaseDestination,
+            supabaseBucket: defaults.string(forKey: UserDefaultsKey.supabaseBucket)
+            ?? defaultPreferences.supabaseBucket,
+            supabasePathPrefix: defaults.string(forKey: UserDefaultsKey.supabasePathPrefix)
+            ?? defaultPreferences.supabasePathPrefix,
+            supabaseTableName: defaults.string(forKey: UserDefaultsKey.supabaseTableName)
+            ?? defaultPreferences.supabaseTableName,
+            supabaseTablePayloadTemplate: loadSupabaseTablePayloadTemplate(defaults: defaults),
+            copiesSupabasePublicURL: defaults.object(forKey: UserDefaultsKey.supabaseCopiesPublicURL) as? Bool
+            ?? defaultPreferences.copiesSupabasePublicURL,
+            shareLinkDomain: defaults.string(forKey: UserDefaultsKey.shareLinkDomain)
+            ?? defaultPreferences.shareLinkDomain,
+            automationSteps: loadAutomationSteps(defaults: defaults)
+        )
+        preferences.automationSteps = migratedEventConfigurations(in: preferences.automationSteps, preferences: preferences)
+        return preferences
+    }
+
+    private static func saveAutomationPreferences(_ preferences: ScreenshotAutomationPreferences) {
+        let defaults = UserDefaults.standard
+        defaults.set(preferences.supabaseProjectURL, forKey: UserDefaultsKey.supabaseProjectURL)
+        defaults.set(preferences.supabaseAnonKey, forKey: UserDefaultsKey.supabaseAnonKey)
+        defaults.set(preferences.supabaseEmail, forKey: UserDefaultsKey.supabaseEmail)
+        defaults.set(preferences.supabasePassword, forKey: UserDefaultsKey.supabasePassword)
+        defaults.set(preferences.supabaseDestination.rawValue, forKey: UserDefaultsKey.supabaseDestination)
+        defaults.set(preferences.supabaseBucket, forKey: UserDefaultsKey.supabaseBucket)
+        defaults.set(preferences.supabasePathPrefix, forKey: UserDefaultsKey.supabasePathPrefix)
+        defaults.set(preferences.supabaseTableName, forKey: UserDefaultsKey.supabaseTableName)
+        defaults.set(preferences.supabaseTablePayloadTemplate, forKey: UserDefaultsKey.supabaseTablePayloadTemplate)
+        defaults.set(preferences.copiesSupabasePublicURL, forKey: UserDefaultsKey.supabaseCopiesPublicURL)
+        defaults.set(preferences.shareLinkDomain, forKey: UserDefaultsKey.shareLinkDomain)
+        saveAutomationSteps(preferences.automationSteps, defaults: defaults)
+    }
+
+    private static func loadSupabaseTablePayloadTemplate(
+        defaults: UserDefaults
+    ) -> String {
+        defaults.string(forKey: UserDefaultsKey.supabaseTablePayloadTemplate)
+            .map(migratedSupabaseTablePayloadTemplate)
+        ?? defaults.data(forKey: UserDefaultsKey.supabaseTableColumnMappings)
+            .flatMap { data in
+                try? JSONDecoder().decode([LegacySupabaseTableColumnMapping].self, from: data)
+            }
+            .map(Self.supabaseTablePayloadTemplate)
+        ?? ScreenshotAutomationPreferences.default.supabaseTablePayloadTemplate
+    }
+
+    private static func migratedSupabaseTablePayloadTemplate(_ template: String) -> String {
+        let oldDefaultTemplate = """
+        {
+          "image": "{base64Image}",
+          "file_name": "{fileName}",
+          "capture_kind": "{captureKind}",
+          "dimensions": "{dimensions}",
+          "created_at": "{createdAt}"
+        }
+        """
+
+        guard template.trimmingCharacters(in: .whitespacesAndNewlines)
+            == oldDefaultTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        else {
+            return template
+        }
+
+        return ScreenshotSupabaseTablePayloadTemplate.defaultValue
+    }
+
+    private static func loadAutomationSteps(defaults: UserDefaults) -> [ScreenshotAutomationStep] {
+        let defaultSteps = ScreenshotAutomationStep.defaultSteps
+        guard let data = defaults.data(forKey: UserDefaultsKey.automationSteps),
+              let savedSteps = try? JSONDecoder().decode([ScreenshotAutomationStep].self, from: data)
+        else {
+            return migratedAutomationSteps(defaults: defaults, defaultSteps: defaultSteps)
+        }
+
+        return savedSteps
+    }
+
+    private static func migratedAutomationSteps(
+        defaults: UserDefaults,
+        defaultSteps: [ScreenshotAutomationStep]
+    ) -> [ScreenshotAutomationStep] {
+        let legacySupabaseEnabled = defaults.object(forKey: UserDefaultsKey.supabaseUploadEnabled) as? Bool ?? false
+        return defaultSteps.map { step in
+            guard step.events.contains(where: { $0.kind == .supabaseUpload }) else {
+                return step
+            }
+
+            var migratedStep = step
+            migratedStep.runsAfterCapture = legacySupabaseEnabled
+            migratedStep.isEnabled = true
+            return migratedStep
+        }
+    }
+
+    private static func migratedEventConfigurations(
+        in steps: [ScreenshotAutomationStep],
+        preferences: ScreenshotAutomationPreferences
+    ) -> [ScreenshotAutomationStep] {
+        steps.map { step in
+            var migratedStep = step
+            for eventIndex in migratedStep.events.indices {
+                switch migratedStep.events[eventIndex].kind {
+                case .supabaseUpload:
+                    if migratedStep.events[eventIndex].supabaseConfiguration.isEmpty {
+                        migratedStep.events[eventIndex].supabaseConfiguration = preferences.legacySupabaseConfiguration
+                    }
+                case .copyShareLink:
+                    if migratedStep.events[eventIndex].shareLinkConfiguration == .default {
+                        migratedStep.events[eventIndex].shareLinkConfiguration = ScreenshotShareLinkConfiguration(
+                            customDomain: preferences.shareLinkDomain,
+                            urlTemplate: shareLinkTemplate(from: preferences.shareLinkDomain)
+                        )
+                    }
+                case .copyFile, .copyFilePath, .openInPreview:
+                    break
+                }
+            }
+
+            return migratedStep
+        }
+    }
+
+    private static func shareLinkTemplate(from legacyDomain: String) -> String {
+        let trimmedDomain = legacyDomain
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmedDomain.isEmpty else {
+            return ""
+        }
+
+        let domain = trimmedDomain.contains("://") ? trimmedDomain : "https://\(trimmedDomain)"
+        return "\(domain)/{uuid}"
+    }
+
+    private static func saveAutomationSteps(
+        _ steps: [ScreenshotAutomationStep],
+        defaults: UserDefaults
+    ) {
+        guard let data = try? JSONEncoder().encode(steps) else {
+            return
+        }
+
+        defaults.set(data, forKey: UserDefaultsKey.automationSteps)
+    }
+
+    private static func supabaseTablePayloadTemplate(from mappings: [LegacySupabaseTableColumnMapping]) -> String {
+        var payload: [String: String] = [:]
+        for mapping in mappings where mapping.isComplete {
+            payload[mapping.columnName.trimmingCharacters(in: .whitespacesAndNewlines)] = "{\(mapping.valueSource.rawValue)}"
+        }
+
+        guard !payload.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let template = String(data: data, encoding: .utf8)
+        else {
+            return ScreenshotSupabaseTablePayloadTemplate.defaultValue
+        }
+
+        return template
+    }
+
     private enum UserDefaultsKey {
         static let namePrefix = "screenshotNamePrefix"
         static let timestampStyle = "screenshotTimestampStyle"
@@ -467,6 +701,38 @@ final class ScreenshotController: ObservableObject {
         static let feedbackSound = "screenshotFeedbackSound"
         static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
         static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
+        static let supabaseUploadEnabled = "screenshotSupabaseUploadEnabled"
+        static let supabaseProjectURL = "screenshotSupabaseProjectURL"
+        static let supabaseAnonKey = "screenshotSupabaseAnonKey"
+        static let supabaseEmail = "screenshotSupabaseEmail"
+        static let supabasePassword = "screenshotSupabasePassword"
+        static let supabaseDestination = "screenshotSupabaseDestination"
+        static let supabaseBucket = "screenshotSupabaseBucket"
+        static let supabasePathPrefix = "screenshotSupabasePathPrefix"
+        static let supabaseTableName = "screenshotSupabaseTableName"
+        static let supabaseTableColumnMappings = "screenshotSupabaseTableColumnMappings"
+        static let supabaseTablePayloadTemplate = "screenshotSupabaseTablePayloadTemplate"
+        static let supabaseCopiesPublicURL = "screenshotSupabaseCopiesPublicURL"
+        static let shareLinkDomain = "screenshotShareLinkDomain"
+        static let automationSteps = "screenshotAutomationSteps"
+    }
+
+    private struct LegacySupabaseTableColumnMapping: Codable {
+        var columnName: String
+        var valueSource: LegacySupabaseTableValueSource
+
+        var isComplete: Bool {
+            !columnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && valueSource != .empty
+        }
+    }
+
+    private enum LegacySupabaseTableValueSource: String, Codable {
+        case empty
+        case base64Image
+        case fileName
+        case captureKind
+        case dimensions
+        case createdAt
     }
 }
 

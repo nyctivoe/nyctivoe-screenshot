@@ -16,7 +16,11 @@ final class ScreenshotPreviewPanelController {
     private let shadowOverflow: CGFloat = 18
     private var panel: NSPanel?
 
-    func show(record: ScreenshotRecord) {
+    func show(
+        record: ScreenshotRecord,
+        automationSteps: [ScreenshotAutomationStep],
+        onRunAutomationStep: @escaping (ScreenshotAutomationStep, ScreenshotRecord) -> Void
+    ) {
         let previewSize = size(for: record)
         let windowSize = contentWindowSize(for: previewSize)
         let panelFrame = frame(for: windowSize)
@@ -29,6 +33,8 @@ final class ScreenshotPreviewPanelController {
             rootView: ScreenshotPreviewPanelView(
                 previewSize: previewSize,
                 record: record,
+                automationSteps: automationSteps,
+                onRunAutomationStep: onRunAutomationStep,
                 onClose: { [weak self] in
                     self?.close()
                 }
@@ -116,6 +122,8 @@ private final class ScreenshotPreviewPanelWindow: NSPanel {
 private struct ScreenshotPreviewPanelView: View {
     let previewSize: CGSize
     let record: ScreenshotRecord
+    let automationSteps: [ScreenshotAutomationStep]
+    let onRunAutomationStep: (ScreenshotAutomationStep, ScreenshotRecord) -> Void
     let onClose: () -> Void
 
     private let shadowOverflow: CGFloat = 18
@@ -216,22 +224,14 @@ private struct ScreenshotPreviewPanelView: View {
     private var optionsPanel: some View {
         if isShowingActions {
             VStack(alignment: .leading, spacing: 2) {
-                Button {
-                    copyFile()
-                } label: {
-                    Label("Copy File", systemImage: "doc.on.doc")
-                }
-
-                Button {
-                    copyFilePath()
-                } label: {
-                    Label("Copy File Path", systemImage: "text.insert")
-                }
-
-                Button {
-                    openInPreview()
-                } label: {
-                    Label("Open in Preview", systemImage: "eye")
+                ForEach(automationSteps) { step in
+                    Button {
+                        onRunAutomationStep(step, record)
+                        isShowingActions = false
+                    } label: {
+                        Label(step.title, systemImage: step.primaryEventKind.systemImage)
+                    }
+                    .help(step.resolvedDetails)
                 }
             }
             .buttonStyle(ScreenshotPreviewMenuButtonStyle())
@@ -275,39 +275,6 @@ private struct ScreenshotPreviewPanelView: View {
             )
     }
 
-    private func copyFile() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([record.url as NSURL])
-    }
-
-    private func copyFilePath() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(record.url.path, forType: .string)
-    }
-
-    private func openInPreview() {
-        guard let previewURL = previewApplicationURL else {
-            NSWorkspace.shared.open(record.url)
-            return
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.open([record.url], withApplicationAt: previewURL, configuration: configuration) { _, error in
-            if error != nil {
-                NSWorkspace.shared.open(record.url)
-            }
-        }
-    }
-
-    private var previewApplicationURL: URL? {
-        let candidates = [
-            URL(fileURLWithPath: "/System/Applications/Preview.app"),
-            URL(fileURLWithPath: "/Applications/Preview.app")
-        ]
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
-    }
 }
 
 private struct ScreenshotPreviewIconButtonStyle: ButtonStyle {
