@@ -83,8 +83,26 @@ struct NyctivoeScreenShotApp: App {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !Self.isAnotherInstanceRunning else {
+            NSApp.terminate(nil)
+            return
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    private static var isAnotherInstanceRunning: Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            return false
+        }
+
+        let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains { $0.processIdentifier != currentProcessIdentifier }
     }
 }
 
