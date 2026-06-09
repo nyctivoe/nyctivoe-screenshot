@@ -5,7 +5,7 @@ This app incorporates a few of my central needs of a screenshot app. Features in
 2. Preview panel
 3. Upload to supabase table/storage (didn't test storage)
 
-More features will be for sure be added...
+More features will for sure be added...
 
 ---
 
