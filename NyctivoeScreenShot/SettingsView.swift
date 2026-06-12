@@ -81,13 +81,54 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                Toggle("Show Screenshot Thumbnail", isOn: previewShowsImagePreviewBinding)
+            }
+
+            Section("Storage") {
+                HStack {
+                    Text("Folder")
+                    Spacer()
+                    Text(screenshotsFolderPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                HStack {
+                    Button {
+                        controller.chooseScreenshotsFolder()
+                    } label: {
+                        Label("Choose Folder", systemImage: "folder")
+                    }
+
+                    Button {
+                        controller.resetScreenshotsFolder()
+                    } label: {
+                        Label("Use Default", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(controller.storagePreferences.customFolderURL == nil)
+                }
+
+                Picker("Folder Structure", selection: folderOrganizationBinding) {
+                    ForEach(ScreenshotFolderOrganization.allCases) { organization in
+                        Text(organization.label).tag(organization)
+                    }
+                }
             }
 
             Section("Saved Name") {
                 TextField("Prefix", text: namePrefixBinding)
 
-                Picker("Timestamp", selection: timestampStyleBinding) {
-                    ForEach(ScreenshotTimestampStyle.allCases) { style in
+                Picker("Date Format", selection: dateFormatStyleBinding) {
+                    ForEach(ScreenshotDateFormatStyle.allCases) { style in
+                        Text(style.label).tag(style)
+                    }
+                }
+
+                Picker("Time Format", selection: timeFormatStyleBinding) {
+                    ForEach(ScreenshotTimeFormatStyle.allCases) { style in
                         Text(style.label).tag(style)
                     }
                 }
@@ -466,12 +507,32 @@ struct SettingsView: View {
         }
     }
 
-    private var timestampStyleBinding: Binding<ScreenshotTimestampStyle> {
+    private var dateFormatStyleBinding: Binding<ScreenshotDateFormatStyle> {
         Binding {
-            controller.namingPreferences.timestampStyle
+            controller.namingPreferences.dateFormatStyle
         } set: { value in
-            controller.namingPreferences.timestampStyle = value
+            controller.namingPreferences.dateFormatStyle = value
         }
+    }
+
+    private var timeFormatStyleBinding: Binding<ScreenshotTimeFormatStyle> {
+        Binding {
+            controller.namingPreferences.timeFormatStyle
+        } set: { value in
+            controller.namingPreferences.timeFormatStyle = value
+        }
+    }
+
+    private var folderOrganizationBinding: Binding<ScreenshotFolderOrganization> {
+        Binding {
+            controller.storagePreferences.folderOrganization
+        } set: { value in
+            controller.storagePreferences.folderOrganization = value
+        }
+    }
+
+    private var screenshotsFolderPath: String {
+        controller.screenshotsFolderURL.path
     }
 
     private var includesCaptureKindBinding: Binding<Bool> {
@@ -535,6 +596,14 @@ struct SettingsView: View {
             controller.previewPreferences.dismissalDelay
         } set: { value in
             controller.previewPreferences.dismissalDelay = value
+        }
+    }
+
+    private var previewShowsImagePreviewBinding: Binding<Bool> {
+        Binding {
+            controller.previewPreferences.showsImagePreview
+        } set: { value in
+            controller.previewPreferences.showsImagePreview = value
         }
     }
 
@@ -632,7 +701,7 @@ struct SettingsView: View {
     }
 
     private var automationPlaceholderText: String {
-        "Placeholders include screenshot values like {fileName}, {filePath}, {width}, {height}; Supabase returned columns like {uuid}, {id}, {name}; and namespaced values like {supabase.uuid}."
+        "Placeholders include screenshot values like {fileName}, {width}, {height}; Supabase returned columns like {uuid}, {id}, {name}; and namespaced values like {supabase.uuid}."
     }
 
     private func supabaseConfiguration(stepIndex: Int, eventIndex: Int) -> ScreenshotSupabaseConfiguration {

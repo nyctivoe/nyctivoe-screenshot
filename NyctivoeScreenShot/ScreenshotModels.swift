@@ -29,9 +29,11 @@ enum ScreenshotKind: String, Codable {
     }
 }
 
-enum ScreenshotTimestampStyle: String, CaseIterable, Identifiable {
-    case dateAndTime
-    case dateOnly
+enum ScreenshotDateFormatStyle: String, CaseIterable, Identifiable {
+    case yearMonthDayDashes
+    case monthDayYearDashes
+    case abbreviatedMonthDayYear
+    case compactYearMonthDay
     case none
 
     var id: String {
@@ -40,10 +42,14 @@ enum ScreenshotTimestampStyle: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .dateAndTime:
-            "Date & Time"
-        case .dateOnly:
-            "Date Only"
+        case .yearMonthDayDashes:
+            "2026-06-11"
+        case .monthDayYearDashes:
+            "06-11-2026"
+        case .abbreviatedMonthDayYear:
+            "Jun 11 2026"
+        case .compactYearMonthDay:
+            "20260611"
         case .none:
             "None"
         }
@@ -51,12 +57,79 @@ enum ScreenshotTimestampStyle: String, CaseIterable, Identifiable {
 
     var dateFormat: String? {
         switch self {
-        case .dateAndTime:
-            "yyyy-MM-dd-HH-mm-ss"
-        case .dateOnly:
+        case .yearMonthDayDashes:
             "yyyy-MM-dd"
+        case .monthDayYearDashes:
+            "MM-dd-yyyy"
+        case .abbreviatedMonthDayYear:
+            "MMM d yyyy"
+        case .compactYearMonthDay:
+            "yyyyMMdd"
         case .none:
             nil
+        }
+    }
+}
+
+enum ScreenshotTimeFormatStyle: String, CaseIterable, Identifiable {
+    case hourMinuteSecondDashes
+    case hourMinuteDashes
+    case twelveHourMinute
+    case compactHourMinuteSecond
+    case none
+
+    var id: String {
+        rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .hourMinuteSecondDashes:
+            "14-30-05"
+        case .hourMinuteDashes:
+            "14-30"
+        case .twelveHourMinute:
+            "2-30 PM"
+        case .compactHourMinuteSecond:
+            "143005"
+        case .none:
+            "None"
+        }
+    }
+
+    var dateFormat: String? {
+        switch self {
+        case .hourMinuteSecondDashes:
+            "HH-mm-ss"
+        case .hourMinuteDashes:
+            "HH-mm"
+        case .twelveHourMinute:
+            "h-mm a"
+        case .compactHourMinuteSecond:
+            "HHmmss"
+        case .none:
+            nil
+        }
+    }
+}
+
+enum ScreenshotFolderOrganization: String, CaseIterable, Identifiable {
+    case singleFolder
+    case year
+    case yearAndMonth
+
+    var id: String {
+        rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .singleFolder:
+            "One Folder"
+        case .year:
+            "Year"
+        case .yearAndMonth:
+            "Year / Month"
         }
     }
 }
@@ -65,13 +138,25 @@ struct ScreenshotNamingPreferences: Equatable {
     static let defaultPrefix = "NyctivoeScreenShot"
     static let `default` = ScreenshotNamingPreferences(
         prefix: defaultPrefix,
-        timestampStyle: .dateAndTime,
+        dateFormatStyle: .yearMonthDayDashes,
+        timeFormatStyle: .hourMinuteSecondDashes,
         includesCaptureKind: false
     )
 
     var prefix: String
-    var timestampStyle: ScreenshotTimestampStyle
+    var dateFormatStyle: ScreenshotDateFormatStyle
+    var timeFormatStyle: ScreenshotTimeFormatStyle
     var includesCaptureKind: Bool
+}
+
+struct ScreenshotStoragePreferences: Equatable {
+    static let `default` = ScreenshotStoragePreferences(
+        customFolderURL: nil,
+        folderOrganization: .singleFolder
+    )
+
+    var customFolderURL: URL?
+    var folderOrganization: ScreenshotFolderOrganization
 }
 
 struct ScreenshotKeyboardShortcut: Equatable {
@@ -427,16 +512,21 @@ struct ScreenshotFeedbackPreferences: Equatable {
 struct ScreenshotPreviewPreferences: Equatable {
     static let defaultDismissalDelay: TimeInterval = 5
     static let dismissalDelayRange: ClosedRange<TimeInterval> = 1...30
-    static let `default` = ScreenshotPreviewPreferences(dismissalDelay: defaultDismissalDelay)
+    static let `default` = ScreenshotPreviewPreferences(
+        dismissalDelay: defaultDismissalDelay,
+        showsImagePreview: true
+    )
 
     var dismissalDelay: TimeInterval {
         didSet {
             dismissalDelay = Self.clampedDismissalDelay(dismissalDelay)
         }
     }
+    var showsImagePreview: Bool
 
-    init(dismissalDelay: TimeInterval) {
+    init(dismissalDelay: TimeInterval, showsImagePreview: Bool) {
         self.dismissalDelay = Self.clampedDismissalDelay(dismissalDelay)
+        self.showsImagePreview = showsImagePreview
     }
 
     static func clampedDismissalDelay(_ delay: TimeInterval) -> TimeInterval {

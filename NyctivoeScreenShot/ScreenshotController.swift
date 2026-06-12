@@ -12,6 +12,10 @@ import Foundation
 
 @MainActor
 final class ScreenshotController: ObservableObject {
+    private static let supabaseCredentialStore = LocalCredentialStore(
+        service: "\(Bundle.main.bundleIdentifier ?? "NyctivoeScreenShot").supabase"
+    )
+
     @Published private(set) var hasScreenRecordingPermission: Bool
     @Published private(set) var isCapturing = false
     @Published private(set) var recentCaptures: [ScreenshotRecord] = []
@@ -25,6 +29,17 @@ final class ScreenshotController: ObservableObject {
 
             storage.namingPreferences = namingPreferences
             Self.saveNamingPreferences(namingPreferences)
+        }
+    }
+    @Published var storagePreferences: ScreenshotStoragePreferences {
+        didSet {
+            guard oldValue != storagePreferences else {
+                return
+            }
+
+            storage.storagePreferences = storagePreferences
+            Self.saveStoragePreferences(storagePreferences)
+            recentCaptures = storage.loadRecentCaptures()
         }
     }
     @Published var shortcutPreferences: ScreenshotShortcutPreferences {
@@ -103,12 +118,17 @@ final class ScreenshotController: ObservableObject {
 
     init() {
         let savedNamingPreferences = Self.loadNamingPreferences()
+        let savedStoragePreferences = Self.loadStoragePreferences()
         let savedShortcutPreferences = Self.loadShortcutPreferences()
         let savedFeedbackPreferences = Self.loadFeedbackPreferences()
         let savedPreviewPreferences = Self.loadPreviewPreferences()
         let savedAutomationPreferences = Self.loadAutomationPreferences()
-        storage = ScreenshotStorage(namingPreferences: savedNamingPreferences)
+        storage = ScreenshotStorage(
+            namingPreferences: savedNamingPreferences,
+            storagePreferences: savedStoragePreferences
+        )
         namingPreferences = savedNamingPreferences
+        storagePreferences = savedStoragePreferences
         shortcutPreferences = savedShortcutPreferences
         feedbackPreferences = savedFeedbackPreferences
         previewPreferences = savedPreviewPreferences
@@ -224,6 +244,37 @@ final class ScreenshotController: ObservableObject {
         } catch {
             handle(error)
         }
+    }
+
+    func chooseScreenshotsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = storage.folderURL
+        panel.prompt = "Choose"
+        panel.message = "Choose where NyctivoeScreenShot saves screenshots."
+
+        panel.begin { [weak self] response in
+            guard response == .OK,
+                  let url = panel.url
+            else {
+                return
+            }
+
+            Task { @MainActor in
+                self?.storagePreferences.customFolderURL = url
+            }
+        }
+    }
+
+    func resetScreenshotsFolder() {
+        storagePreferences.customFolderURL = nil
+    }
+
+    func resetStoragePreferences() {
+        storagePreferences = .default
     }
 
     func reveal(_ record: ScreenshotRecord) {
@@ -522,14 +573,19 @@ final class ScreenshotController: ObservableObject {
         let defaults = UserDefaults.standard
         let defaultPreferences = ScreenshotNamingPreferences.default
         let prefix = defaults.string(forKey: UserDefaultsKey.namePrefix) ?? defaultPreferences.prefix
-        let timestampStyle = defaults
-            .string(forKey: UserDefaultsKey.timestampStyle)
-            .flatMap(ScreenshotTimestampStyle.init(rawValue:))
-        ?? defaultPreferences.timestampStyle
+        let dateFormatStyle = defaults
+            .string(forKey: UserDefaultsKey.dateFormatStyle)
+            .flatMap(ScreenshotDateFormatStyle.init(rawValue:))
+        ?? migratedDateFormatStyle(defaults: defaults)
+        let timeFormatStyle = defaults
+            .string(forKey: UserDefaultsKey.timeFormatStyle)
+            .flatMap(ScreenshotTimeFormatStyle.init(rawValue:))
+        ?? migratedTimeFormatStyle(defaults: defaults)
 
         return ScreenshotNamingPreferences(
             prefix: prefix,
-            timestampStyle: timestampStyle,
+            dateFormatStyle: dateFormatStyle,
+            timeFormatStyle: timeFormatStyle,
             includesCaptureKind: defaults.object(forKey: UserDefaultsKey.includesCaptureKind) as? Bool
             ?? defaultPreferences.includesCaptureKind
         )
@@ -538,8 +594,56 @@ final class ScreenshotController: ObservableObject {
     private static func saveNamingPreferences(_ preferences: ScreenshotNamingPreferences) {
         let defaults = UserDefaults.standard
         defaults.set(preferences.prefix, forKey: UserDefaultsKey.namePrefix)
-        defaults.set(preferences.timestampStyle.rawValue, forKey: UserDefaultsKey.timestampStyle)
+        defaults.set(preferences.dateFormatStyle.rawValue, forKey: UserDefaultsKey.dateFormatStyle)
+        defaults.set(preferences.timeFormatStyle.rawValue, forKey: UserDefaultsKey.timeFormatStyle)
         defaults.set(preferences.includesCaptureKind, forKey: UserDefaultsKey.includesCaptureKind)
+    }
+
+    private static func migratedDateFormatStyle(defaults: UserDefaults) -> ScreenshotDateFormatStyle {
+        switch defaults.string(forKey: UserDefaultsKey.timestampStyle) {
+        case "dateAndTime", "dateOnly":
+            .yearMonthDayDashes
+        case "none":
+            .none
+        default:
+            ScreenshotNamingPreferences.default.dateFormatStyle
+        }
+    }
+
+    private static func migratedTimeFormatStyle(defaults: UserDefaults) -> ScreenshotTimeFormatStyle {
+        switch defaults.string(forKey: UserDefaultsKey.timestampStyle) {
+        case "dateAndTime":
+            .hourMinuteSecondDashes
+        case "dateOnly", "none":
+            .none
+        default:
+            ScreenshotNamingPreferences.default.timeFormatStyle
+        }
+    }
+
+    private static func loadStoragePreferences() -> ScreenshotStoragePreferences {
+        let defaults = UserDefaults.standard
+        let defaultPreferences = ScreenshotStoragePreferences.default
+        let customFolderURL = defaults.string(forKey: UserDefaultsKey.customFolderPath).map(URL.init(fileURLWithPath:))
+        let folderOrganization = defaults
+            .string(forKey: UserDefaultsKey.folderOrganization)
+            .flatMap(ScreenshotFolderOrganization.init(rawValue:))
+        ?? defaultPreferences.folderOrganization
+
+        return ScreenshotStoragePreferences(
+            customFolderURL: customFolderURL,
+            folderOrganization: folderOrganization
+        )
+    }
+
+    private static func saveStoragePreferences(_ preferences: ScreenshotStoragePreferences) {
+        let defaults = UserDefaults.standard
+        if let customFolderURL = preferences.customFolderURL {
+            defaults.set(customFolderURL.path, forKey: UserDefaultsKey.customFolderPath)
+        } else {
+            defaults.removeObject(forKey: UserDefaultsKey.customFolderPath)
+        }
+        defaults.set(preferences.folderOrganization.rawValue, forKey: UserDefaultsKey.folderOrganization)
     }
 
     private static func loadShortcutPreferences() -> ScreenshotShortcutPreferences {
@@ -641,11 +745,19 @@ final class ScreenshotController: ObservableObject {
         let dismissalDelay = defaults.object(forKey: UserDefaultsKey.previewDismissalDelay) as? TimeInterval
             ?? defaultPreferences.dismissalDelay
 
-        return ScreenshotPreviewPreferences(dismissalDelay: dismissalDelay)
+        let showsImagePreview = defaults.object(forKey: UserDefaultsKey.previewShowsImagePreview) as? Bool
+            ?? defaultPreferences.showsImagePreview
+
+        return ScreenshotPreviewPreferences(
+            dismissalDelay: dismissalDelay,
+            showsImagePreview: showsImagePreview
+        )
     }
 
     private static func savePreviewPreferences(_ preferences: ScreenshotPreviewPreferences) {
-        UserDefaults.standard.set(preferences.dismissalDelay, forKey: UserDefaultsKey.previewDismissalDelay)
+        let defaults = UserDefaults.standard
+        defaults.set(preferences.dismissalDelay, forKey: UserDefaultsKey.previewDismissalDelay)
+        defaults.set(preferences.showsImagePreview, forKey: UserDefaultsKey.previewShowsImagePreview)
     }
 
     private static func loadAutomationPreferences() -> ScreenshotAutomationPreferences {
@@ -655,12 +767,9 @@ final class ScreenshotController: ObservableObject {
         var preferences = ScreenshotAutomationPreferences(
             supabaseProjectURL: defaults.string(forKey: UserDefaultsKey.supabaseProjectURL)
             ?? defaultPreferences.supabaseProjectURL,
-            supabaseAnonKey: defaults.string(forKey: UserDefaultsKey.supabaseAnonKey)
-            ?? defaultPreferences.supabaseAnonKey,
-            supabaseEmail: defaults.string(forKey: UserDefaultsKey.supabaseEmail)
-            ?? defaultPreferences.supabaseEmail,
-            supabasePassword: defaults.string(forKey: UserDefaultsKey.supabasePassword)
-            ?? defaultPreferences.supabasePassword,
+            supabaseAnonKey: loadSupabaseCredential(.anonKey, legacyDefaultsKey: UserDefaultsKey.supabaseAnonKey, defaults: defaults),
+            supabaseEmail: loadSupabaseCredential(.email, legacyDefaultsKey: UserDefaultsKey.supabaseEmail, defaults: defaults),
+            supabasePassword: loadSupabaseCredential(.password, legacyDefaultsKey: UserDefaultsKey.supabasePassword, defaults: defaults),
             supabaseDestination: defaults
                 .string(forKey: UserDefaultsKey.supabaseDestination)
                 .flatMap(ScreenshotSupabaseDestination.init(rawValue:))
@@ -679,15 +788,17 @@ final class ScreenshotController: ObservableObject {
             automationSteps: loadAutomationSteps(defaults: defaults)
         )
         preferences.automationSteps = migratedEventConfigurations(in: preferences.automationSteps, preferences: preferences)
+        saveAutomationPreferences(preferences)
         return preferences
     }
 
     private static func saveAutomationPreferences(_ preferences: ScreenshotAutomationPreferences) {
         let defaults = UserDefaults.standard
+        saveSupabaseCredentials(from: preferences.legacySupabaseConfiguration, eventID: nil)
         defaults.set(preferences.supabaseProjectURL, forKey: UserDefaultsKey.supabaseProjectURL)
-        defaults.set(preferences.supabaseAnonKey, forKey: UserDefaultsKey.supabaseAnonKey)
-        defaults.set(preferences.supabaseEmail, forKey: UserDefaultsKey.supabaseEmail)
-        defaults.set(preferences.supabasePassword, forKey: UserDefaultsKey.supabasePassword)
+        defaults.removeObject(forKey: UserDefaultsKey.supabaseAnonKey)
+        defaults.removeObject(forKey: UserDefaultsKey.supabaseEmail)
+        defaults.removeObject(forKey: UserDefaultsKey.supabasePassword)
         defaults.set(preferences.supabaseDestination.rawValue, forKey: UserDefaultsKey.supabaseDestination)
         defaults.set(preferences.supabaseBucket, forKey: UserDefaultsKey.supabaseBucket)
         defaults.set(preferences.supabasePathPrefix, forKey: UserDefaultsKey.supabasePathPrefix)
@@ -696,6 +807,75 @@ final class ScreenshotController: ObservableObject {
         defaults.set(preferences.copiesSupabasePublicURL, forKey: UserDefaultsKey.supabaseCopiesPublicURL)
         defaults.set(preferences.shareLinkDomain, forKey: UserDefaultsKey.shareLinkDomain)
         saveAutomationSteps(preferences.automationSteps, defaults: defaults)
+    }
+
+    private static func loadSupabaseCredential(
+        _ field: SupabaseCredentialField,
+        legacyDefaultsKey: String,
+        defaults: UserDefaults
+    ) -> String {
+        if let storedValue = supabaseCredentialStore.string(for: credentialAccount(field, eventID: nil)) {
+            defaults.removeObject(forKey: legacyDefaultsKey)
+            return storedValue
+        }
+
+        defer {
+            defaults.removeObject(forKey: legacyDefaultsKey)
+        }
+
+        guard let legacyValue = defaults.string(forKey: legacyDefaultsKey), !legacyValue.isEmpty else {
+            return ""
+        }
+
+        try? supabaseCredentialStore.setString(legacyValue, for: credentialAccount(field, eventID: nil))
+        return legacyValue
+    }
+
+    private static func hydratedSupabaseConfiguration(
+        _ configuration: ScreenshotSupabaseConfiguration,
+        eventID: UUID?
+    ) -> ScreenshotSupabaseConfiguration {
+        var hydratedConfiguration = configuration
+        hydratedConfiguration.anonKey = hydratedCredential(configuration.anonKey, field: .anonKey, eventID: eventID)
+        hydratedConfiguration.email = hydratedCredential(configuration.email, field: .email, eventID: eventID)
+        hydratedConfiguration.password = hydratedCredential(configuration.password, field: .password, eventID: eventID)
+        return hydratedConfiguration
+    }
+
+    private static func hydratedCredential(
+        _ decodedValue: String,
+        field: SupabaseCredentialField,
+        eventID: UUID?
+    ) -> String {
+        if !decodedValue.isEmpty {
+            try? supabaseCredentialStore.setString(decodedValue, for: credentialAccount(field, eventID: eventID))
+            return decodedValue
+        }
+
+        return supabaseCredentialStore.string(for: credentialAccount(field, eventID: eventID)) ?? ""
+    }
+
+    private static func saveSupabaseCredentials(from configuration: ScreenshotSupabaseConfiguration, eventID: UUID?) {
+        saveSupabaseCredential(configuration.anonKey, field: .anonKey, eventID: eventID)
+        saveSupabaseCredential(configuration.email, field: .email, eventID: eventID)
+        saveSupabaseCredential(configuration.password, field: .password, eventID: eventID)
+    }
+
+    private static func saveSupabaseCredential(_ value: String, field: SupabaseCredentialField, eventID: UUID?) {
+        let account = credentialAccount(field, eventID: eventID)
+        if value.isEmpty {
+            supabaseCredentialStore.removeString(for: account)
+        } else {
+            try? supabaseCredentialStore.setString(value, for: account)
+        }
+    }
+
+    private static func credentialAccount(_ field: SupabaseCredentialField, eventID: UUID?) -> String {
+        if let eventID {
+            return "supabase.event.\(eventID.uuidString).\(field.rawValue)"
+        }
+
+        return "supabase.global.\(field.rawValue)"
     }
 
     private static func loadSupabaseTablePayloadTemplate(
@@ -739,7 +919,7 @@ final class ScreenshotController: ObservableObject {
             return migratedAutomationSteps(defaults: defaults, defaultSteps: defaultSteps)
         }
 
-        return savedSteps
+        return hydratedSupabaseCredentials(in: savedSteps)
     }
 
     private static func migratedAutomationSteps(
@@ -759,11 +939,25 @@ final class ScreenshotController: ObservableObject {
         }
     }
 
+    private static func hydratedSupabaseCredentials(in steps: [ScreenshotAutomationStep]) -> [ScreenshotAutomationStep] {
+        steps.map { step in
+            var hydratedStep = step
+            for eventIndex in hydratedStep.events.indices where hydratedStep.events[eventIndex].kind == .supabaseUpload {
+                hydratedStep.events[eventIndex].supabaseConfiguration = hydratedSupabaseConfiguration(
+                    hydratedStep.events[eventIndex].supabaseConfiguration,
+                    eventID: hydratedStep.events[eventIndex].id
+                )
+            }
+
+            return hydratedStep
+        }
+    }
+
     private static func migratedEventConfigurations(
         in steps: [ScreenshotAutomationStep],
         preferences: ScreenshotAutomationPreferences
     ) -> [ScreenshotAutomationStep] {
-        steps.map { step in
+        hydratedSupabaseCredentials(in: steps.map { step in
             var migratedStep = step
             for eventIndex in migratedStep.events.indices {
                 switch migratedStep.events[eventIndex].kind {
@@ -784,7 +978,7 @@ final class ScreenshotController: ObservableObject {
             }
 
             return migratedStep
-        }
+        })
     }
 
     private static func shareLinkTemplate(from legacyDomain: String) -> String {
@@ -803,7 +997,20 @@ final class ScreenshotController: ObservableObject {
         _ steps: [ScreenshotAutomationStep],
         defaults: UserDefaults
     ) {
-        guard let data = try? JSONEncoder().encode(steps) else {
+        let sanitizedSteps = steps.map { step in
+            var sanitizedStep = step
+            for eventIndex in sanitizedStep.events.indices where sanitizedStep.events[eventIndex].kind == .supabaseUpload {
+                let configuration = sanitizedStep.events[eventIndex].supabaseConfiguration
+                saveSupabaseCredentials(from: configuration, eventID: sanitizedStep.events[eventIndex].id)
+                sanitizedStep.events[eventIndex].supabaseConfiguration.anonKey = ""
+                sanitizedStep.events[eventIndex].supabaseConfiguration.email = ""
+                sanitizedStep.events[eventIndex].supabaseConfiguration.password = ""
+            }
+
+            return sanitizedStep
+        }
+
+        guard let data = try? JSONEncoder().encode(sanitizedSteps) else {
             return
         }
 
@@ -826,10 +1033,20 @@ final class ScreenshotController: ObservableObject {
         return template
     }
 
+    private enum SupabaseCredentialField: String {
+        case anonKey
+        case email
+        case password
+    }
+
     private enum UserDefaultsKey {
         static let namePrefix = "screenshotNamePrefix"
         static let timestampStyle = "screenshotTimestampStyle"
+        static let dateFormatStyle = "screenshotDateFormatStyle"
+        static let timeFormatStyle = "screenshotTimeFormatStyle"
         static let includesCaptureKind = "screenshotIncludesCaptureKind"
+        static let customFolderPath = "screenshotCustomFolderPath"
+        static let folderOrganization = "screenshotFolderOrganization"
         static let fullScreenShortcutKeyCode = "fullScreenShortcutKeyCode"
         static let fullScreenShortcutModifiers = "fullScreenShortcutModifiers"
         static let partialShortcutKeyCode = "partialShortcutKeyCode"
@@ -841,6 +1058,7 @@ final class ScreenshotController: ObservableObject {
         static let feedbackFlashIntensity = "screenshotFeedbackFlashIntensity"
         static let feedbackFlashDuration = "screenshotFeedbackFlashDuration"
         static let previewDismissalDelay = "screenshotPreviewDismissalDelay"
+        static let previewShowsImagePreview = "screenshotPreviewShowsImagePreview"
         static let supabaseUploadEnabled = "screenshotSupabaseUploadEnabled"
         static let supabaseProjectURL = "screenshotSupabaseProjectURL"
         static let supabaseAnonKey = "screenshotSupabaseAnonKey"

@@ -21,7 +21,7 @@ private enum ScreenshotSupabaseProjectURL {
         let valueWithScheme = trimmedValue.contains("://") ? trimmedValue : "https://\(trimmedValue)"
         guard var components = URLComponents(string: valueWithScheme),
               let scheme = components.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
+              scheme == "https",
               let host = components.host,
               !host.isEmpty
         else {
@@ -149,6 +149,70 @@ struct ScreenshotSupabaseConfiguration: Codable, Equatable {
 
     var isEmpty: Bool {
         self == .default
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case projectURL
+        case anonKey
+        case email
+        case password
+        case destination
+        case bucket
+        case pathPrefix
+        case tableName
+        case tablePayloadTemplate
+        case copiesPublicURL
+    }
+
+    init(
+        projectURL: String,
+        anonKey: String,
+        email: String,
+        password: String,
+        destination: ScreenshotSupabaseDestination,
+        bucket: String,
+        pathPrefix: String,
+        tableName: String,
+        tablePayloadTemplate: String,
+        copiesPublicURL: Bool
+    ) {
+        self.projectURL = projectURL
+        self.anonKey = anonKey
+        self.email = email
+        self.password = password
+        self.destination = destination
+        self.bucket = bucket
+        self.pathPrefix = pathPrefix
+        self.tableName = tableName
+        self.tablePayloadTemplate = tablePayloadTemplate
+        self.copiesPublicURL = copiesPublicURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaultConfiguration = Self.default
+
+        projectURL = try container.decodeIfPresent(String.self, forKey: .projectURL) ?? defaultConfiguration.projectURL
+        anonKey = try container.decodeIfPresent(String.self, forKey: .anonKey) ?? defaultConfiguration.anonKey
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? defaultConfiguration.email
+        password = try container.decodeIfPresent(String.self, forKey: .password) ?? defaultConfiguration.password
+        destination = try container.decodeIfPresent(ScreenshotSupabaseDestination.self, forKey: .destination) ?? defaultConfiguration.destination
+        bucket = try container.decodeIfPresent(String.self, forKey: .bucket) ?? defaultConfiguration.bucket
+        pathPrefix = try container.decodeIfPresent(String.self, forKey: .pathPrefix) ?? defaultConfiguration.pathPrefix
+        tableName = try container.decodeIfPresent(String.self, forKey: .tableName) ?? defaultConfiguration.tableName
+        tablePayloadTemplate = try container.decodeIfPresent(String.self, forKey: .tablePayloadTemplate) ?? defaultConfiguration.tablePayloadTemplate
+        copiesPublicURL = try container.decodeIfPresent(Bool.self, forKey: .copiesPublicURL) ?? defaultConfiguration.copiesPublicURL
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(projectURL, forKey: .projectURL)
+        try container.encode(destination, forKey: .destination)
+        try container.encode(bucket, forKey: .bucket)
+        try container.encode(pathPrefix, forKey: .pathPrefix)
+        try container.encode(tableName, forKey: .tableName)
+        try container.encode(tablePayloadTemplate, forKey: .tablePayloadTemplate)
+        try container.encode(copiesPublicURL, forKey: .copiesPublicURL)
     }
 }
 
@@ -415,8 +479,7 @@ enum ScreenshotSupabaseTablePayloadTemplate {
         "dimensions",
         "createdAt",
         "width",
-        "height",
-        "filePath"
+        "height"
     ]
 
     static func renderedPayload(template: String, record: ScreenshotRecord, base64: String) throws -> [String: Any] {
@@ -446,8 +509,7 @@ enum ScreenshotSupabaseTablePayloadTemplate {
             "dimensions": record.dimensionsText,
             "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
             "width": "\(Int(record.pixelSize.width))",
-            "height": "\(Int(record.pixelSize.height))",
-            "filePath": record.url.path
+            "height": "\(Int(record.pixelSize.height))"
         ]
 
         var renderedTemplate = template
@@ -519,7 +581,6 @@ final class ScreenshotAutomationContext {
     private static func defaultValues(for record: ScreenshotRecord) -> [String: String] {
         [
             "fileName": record.fileName,
-            "filePath": record.url.path,
             "captureKind": record.kind.rawValue,
             "dimensions": record.dimensionsText,
             "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
@@ -1118,7 +1179,7 @@ enum ScreenshotAutomationError: LocalizedError {
         case .supabaseNotConfigured:
             "Supabase upload is enabled but not configured."
         case .invalidSupabaseURL:
-            "The Supabase project URL is invalid."
+            "The Supabase project URL must be a valid HTTPS URL."
         case .invalidServerResponse:
             "Supabase returned an invalid response."
         case .tableColumnsUnavailable:

@@ -15,27 +15,24 @@ final class ScreenshotStorage {
     private let dateFormatter: DateFormatter
     private let recentCapturesLimit = 8
 
-    let folderURL: URL
     var namingPreferences: ScreenshotNamingPreferences
+    var storagePreferences: ScreenshotStoragePreferences
+
+    var folderURL: URL {
+        storagePreferences.customFolderURL ?? Self.defaultFolderURL(fileManager: fileManager)
+    }
 
     init(
         fileManager: FileManager = .default,
-        namingPreferences: ScreenshotNamingPreferences = .default
+        namingPreferences: ScreenshotNamingPreferences = .default,
+        storagePreferences: ScreenshotStoragePreferences = .default
     ) {
         self.fileManager = fileManager
         self.namingPreferences = namingPreferences
-        folderURL = fileManager
-            .urls(for: .picturesDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
-        ?? fileManager
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent("Pictures", isDirectory: true)
-            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
+        self.storagePreferences = storagePreferences
 
         dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
     }
 
     func ensureFolderExists() throws {
@@ -47,10 +44,9 @@ final class ScreenshotStorage {
     }
 
     func save(_ image: CGImage, kind: ScreenshotKind) throws -> ScreenshotRecord {
-        try ensureFolderExists()
-
         let createdAt = Date()
-        let url = try availableURL(for: createdAt, kind: kind)
+        let destinationFolderURL = try destinationFolderURL(for: createdAt)
+        let url = try availableURL(for: createdAt, kind: kind, in: destinationFolderURL)
         guard let destination = CGImageDestinationCreateWithURL(
             url as CFURL,
             UTType.png.identifier as CFString,
@@ -74,7 +70,14 @@ final class ScreenshotStorage {
     }
 
     func previewFileName(for kind: ScreenshotKind) -> String {
-        "\(baseName(for: Date(), kind: kind)).png"
+        let date = Date()
+        let fileName = "\(baseName(for: date, kind: kind)).png"
+        let relativeFolderPath = relativeFolderPath(for: date)
+        guard !relativeFolderPath.isEmpty else {
+            return fileName
+        }
+
+        return "\(relativeFolderPath)/\(fileName)"
     }
 
     func loadRecentCaptures() -> [ScreenshotRecord] {
@@ -83,12 +86,13 @@ final class ScreenshotStorage {
 
     func saveRecentCaptures(_ records: [ScreenshotRecord]) {
         do {
-            try ensureFolderExists()
+            try ensureRecentCapturesIndexFolderExists()
             let recentRecords = Array(records.prefix(recentCapturesLimit))
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(recentRecords)
             try data.write(to: recentCapturesIndexURL, options: .atomic)
+            removeLegacyRecentCapturesIndexIfNeeded()
         } catch {
             // Recent capture history is best-effort and should not block screenshots.
         }
@@ -105,7 +109,9 @@ final class ScreenshotStorage {
         return reconciledRecords
     }
 
-    private func availableURL(for date: Date, kind: ScreenshotKind) throws -> URL {
+    private func availableURL(for date: Date, kind: ScreenshotKind, in folderURL: URL) throws -> URL {
+        try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
+
         let baseName = baseName(for: date, kind: kind)
         var candidate = folderURL.appendingPathComponent("\(baseName).png", isDirectory: false)
         var suffix = 2
@@ -125,12 +131,50 @@ final class ScreenshotStorage {
             components.append(kind.fileNameComponent)
         }
 
-        if let dateFormat = namingPreferences.timestampStyle.dateFormat {
+        if let dateFormat = namingPreferences.dateFormatStyle.dateFormat {
             dateFormatter.dateFormat = dateFormat
-            components.append(dateFormatter.string(from: date))
+            components.append(sanitizedNameComponent(dateFormatter.string(from: date)))
+        }
+
+        if let timeFormat = namingPreferences.timeFormatStyle.dateFormat {
+            dateFormatter.dateFormat = timeFormat
+            components.append(sanitizedNameComponent(dateFormatter.string(from: date)))
         }
 
         return components.joined(separator: "-")
+    }
+
+    private func destinationFolderURL(for date: Date) throws -> URL {
+        let destinationURL = relativeFolderPathComponents(for: date).reduce(folderURL) { partialURL, component in
+            partialURL.appendingPathComponent(component, isDirectory: true)
+        }
+
+        do {
+            try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            return destinationURL
+        } catch {
+            throw ScreenshotAppError.folderUnavailable
+        }
+    }
+
+    private func relativeFolderPath(for date: Date) -> String {
+        relativeFolderPathComponents(for: date).joined(separator: "/")
+    }
+
+    private func relativeFolderPathComponents(for date: Date) -> [String] {
+        switch storagePreferences.folderOrganization {
+        case .singleFolder:
+            []
+        case .year:
+            [formattedDate(date, format: "yyyy")]
+        case .yearAndMonth:
+            [formattedDate(date, format: "yyyy"), formattedDate(date, format: "MM-MMMM")]
+        }
+    }
+
+    private func formattedDate(_ date: Date, format: String) -> String {
+        dateFormatter.dateFormat = format
+        return sanitizedNameComponent(dateFormatter.string(from: date))
     }
 
     private func sanitizedNameComponent(_ value: String) -> String {
@@ -149,20 +193,53 @@ final class ScreenshotStorage {
     }
 
     private var recentCapturesIndexURL: URL {
+        Self.applicationSupportFolderURL(fileManager: fileManager)
+            .appendingPathComponent("recent-captures.json", isDirectory: false)
+    }
+
+    private var legacyRecentCapturesIndexURL: URL {
         folderURL.appendingPathComponent(".recent-captures.json", isDirectory: false)
     }
 
+    private func ensureRecentCapturesIndexFolderExists() throws {
+        try fileManager.createDirectory(
+            at: recentCapturesIndexURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+    }
+
     private func readPersistedRecentCaptures() -> [ScreenshotRecord] {
-        guard fileManager.fileExists(atPath: recentCapturesIndexURL.path) else {
+        if fileManager.fileExists(atPath: recentCapturesIndexURL.path) {
+            return readRecentCapturesIndex(at: recentCapturesIndexURL)
+        }
+
+        let legacyRecords = readRecentCapturesIndex(at: legacyRecentCapturesIndexURL)
+        if !legacyRecords.isEmpty {
+            saveRecentCaptures(legacyRecords)
+        }
+
+        return legacyRecords
+    }
+
+    private func readRecentCapturesIndex(at url: URL) -> [ScreenshotRecord] {
+        guard fileManager.fileExists(atPath: url.path) else {
             return []
         }
 
         do {
-            let data = try Data(contentsOf: recentCapturesIndexURL)
+            let data = try Data(contentsOf: url)
             return try JSONDecoder().decode([ScreenshotRecord].self, from: data)
         } catch {
             return []
         }
+    }
+
+    private func removeLegacyRecentCapturesIndexIfNeeded() {
+        guard fileManager.fileExists(atPath: legacyRecentCapturesIndexURL.path) else {
+            return
+        }
+
+        try? fileManager.removeItem(at: legacyRecentCapturesIndexURL)
     }
 
     private func reconciledRecentCaptures(from records: [ScreenshotRecord]) -> [ScreenshotRecord] {
@@ -174,5 +251,28 @@ final class ScreenshotStorage {
         }
 
         return Array(existingRecords.prefix(recentCapturesLimit))
+    }
+
+    private static func defaultFolderURL(fileManager: FileManager) -> URL {
+        fileManager
+            .urls(for: .picturesDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
+        ?? fileManager
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Pictures", isDirectory: true)
+            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
+    }
+
+    private static func applicationSupportFolderURL(fileManager: FileManager) -> URL {
+        fileManager
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
+        ?? fileManager
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("NyctivoeScreenShot", isDirectory: true)
     }
 }

@@ -238,13 +238,13 @@ private struct ScreenshotPreviewPanelView: View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(Color(nsColor: .windowBackgroundColor).opacity(0.62))
             .overlay {
-                if let image = NSImage(contentsOf: record.url) {
+                if previewPreferences.showsImagePreview, let image = NSImage(contentsOf: record.url) {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    Image(systemName: "photo")
+                    Image(systemName: previewPreferences.showsImagePreview ? "photo" : "eye.slash")
                         .font(.system(size: 34, weight: .regular))
                         .foregroundStyle(.secondary)
                 }
