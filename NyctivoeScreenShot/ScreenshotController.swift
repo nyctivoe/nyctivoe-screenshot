@@ -44,6 +44,7 @@ final class ScreenshotController: ObservableObject {
             }
 
             Self.saveFeedbackPreferences(feedbackPreferences)
+            feedbackPerformer.prepare(feedbackPreferences)
         }
     }
     @Published var previewPreferences: ScreenshotPreviewPreferences {
@@ -74,6 +75,8 @@ final class ScreenshotController: ObservableObject {
     private var shortcutEventMonitor: Any?
     private var shortcutRegistrationFailures: [GlobalShortcutRegistrationFailure] = []
     private var recentCapturesSyncTask: Task<Void, Never>?
+    private var captureWarmUpTask: Task<Void, Never>?
+    private var didWarmCapturePipeline = false
 
     var screenshotsFolderURL: URL {
         storage.folderURL
@@ -127,6 +130,9 @@ final class ScreenshotController: ObservableObject {
         } catch {
             statusMessage = error.localizedDescription
         }
+
+        feedbackPerformer.prepare(feedbackPreferences)
+        warmUpCapturePipeline()
     }
 
     deinit {
@@ -135,6 +141,7 @@ final class ScreenshotController: ObservableObject {
         }
 
         recentCapturesSyncTask?.cancel()
+        captureWarmUpTask?.cancel()
     }
 
     func refreshPermissionStatus() {
@@ -147,6 +154,7 @@ final class ScreenshotController: ObservableObject {
         statusMessage = hasScreenRecordingPermission
             ? "Screen Recording permission granted."
             : "Enable Screen Recording permission in System Settings."
+        warmUpCapturePipeline()
     }
 
     func captureFullScreen() {
@@ -186,6 +194,9 @@ final class ScreenshotController: ObservableObject {
             requestScreenRecordingPermission()
             return
         }
+
+        feedbackPerformer.prepare(feedbackPreferences)
+        warmUpCapturePipeline()
 
         let focusRestorer = ActiveApplicationRestorer()
         statusMessage = "Select an area."
@@ -283,14 +294,14 @@ final class ScreenshotController: ObservableObject {
             return
         }
 
+        focusRestorer.restore()
+
         Task {
             defer {
                 finishCapture()
-                focusRestorer.restore()
             }
 
             do {
-                try await Task.sleep(nanoseconds: 120_000_000)
                 let image = try await captureService.capture(rect: rect)
                 let record = try storage.save(image, kind: .partial)
                 remember(record)
@@ -317,6 +328,31 @@ final class ScreenshotController: ObservableObject {
         isCapturing = true
         statusMessage = "Capturing..."
         return true
+    }
+
+    private func warmUpCapturePipeline() {
+        guard hasScreenRecordingPermission,
+              !didWarmCapturePipeline,
+              captureWarmUpTask == nil
+        else {
+            return
+        }
+
+        captureWarmUpTask = Task(priority: .utility) { [weak self, captureService] in
+            let didWarm = await captureService.warmUp()
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                guard let self else {
+                    return
+                }
+
+                self.didWarmCapturePipeline = didWarm
+                self.captureWarmUpTask = nil
+            }
+        }
     }
 
     private func finishCapture() {

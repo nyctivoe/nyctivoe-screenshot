@@ -10,11 +10,28 @@ import AppKit
 @MainActor
 final class ScreenshotFeedbackPerformer {
     private var flashWindows: [NSWindow] = []
+    private var soundCache: [ScreenshotFeedbackSound: NSSound] = [:]
     private var activeSound: NSSound?
+
+    init() {
+        ScreenshotFeedbackSound.allCases.forEach { sound in
+            _ = preparedSound(for: sound)
+        }
+    }
+
+    func prepare(_ preferences: ScreenshotFeedbackPreferences) {
+        guard preferences.playsSound, preferences.soundVolume > 0 else {
+            return
+        }
+
+        _ = preparedSound(for: preferences.sound)
+    }
 
     func perform(_ preferences: ScreenshotFeedbackPreferences) {
         if preferences.playsSound, preferences.soundVolume > 0 {
-            activeSound = NSSound(named: preferences.sound.soundName)
+            activeSound = preparedSound(for: preferences.sound)
+            activeSound?.stop()
+            activeSound?.currentTime = 0
             activeSound?.volume = Float(preferences.soundVolume)
             activeSound?.play()
         }
@@ -25,6 +42,27 @@ final class ScreenshotFeedbackPerformer {
                 duration: preferences.flashDuration
             )
         }
+    }
+
+    private func preparedSound(for sound: ScreenshotFeedbackSound) -> NSSound? {
+        if let cachedSound = soundCache[sound] {
+            return cachedSound
+        }
+
+        let loadedSound = NSSound(named: sound.soundName)
+        loadedSound.map(prime)
+        soundCache[sound] = loadedSound
+        return loadedSound
+    }
+
+    private func prime(_ sound: NSSound) {
+        let volume = sound.volume
+        sound.volume = 0
+        if sound.play() {
+            sound.stop()
+            sound.currentTime = 0
+        }
+        sound.volume = volume
     }
 
     private func flashScreens(

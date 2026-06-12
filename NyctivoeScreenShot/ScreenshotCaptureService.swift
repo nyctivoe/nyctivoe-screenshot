@@ -10,15 +10,28 @@ import Foundation
 import ScreenCaptureKit
 
 struct ScreenshotCaptureService {
-    var hasScreenRecordingPermission: Bool {
+    nonisolated var hasScreenRecordingPermission: Bool {
         CGPreflightScreenCaptureAccess()
     }
 
-    func requestScreenRecordingPermission() -> Bool {
+    nonisolated func requestScreenRecordingPermission() -> Bool {
         CGRequestScreenCaptureAccess()
     }
 
-    func captureMainDisplay() async throws -> CGImage {
+    nonisolated func warmUp() async -> Bool {
+        guard hasScreenRecordingPermission else {
+            return false
+        }
+
+        do {
+            _ = try await SCShareableContent.current
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    nonisolated func captureMainDisplay() async throws -> CGImage {
         guard hasScreenRecordingPermission else {
             throw ScreenshotAppError.screenRecordingPermissionMissing
         }
@@ -28,7 +41,7 @@ struct ScreenshotCaptureService {
         return try await capture(filter: filter, sourceRect: filter.contentRect)
     }
 
-    func capture(rect: CGRect) async throws -> CGImage {
+    nonisolated func capture(rect: CGRect) async throws -> CGImage {
         guard hasScreenRecordingPermission else {
             throw ScreenshotAppError.screenRecordingPermissionMissing
         }
@@ -44,7 +57,7 @@ struct ScreenshotCaptureService {
         return try await capture(filter: filter, sourceRect: sourceRect)
     }
 
-    private func mainDisplayFilter(from content: SCShareableContent) throws -> SCContentFilter {
+    private nonisolated func mainDisplayFilter(from content: SCShareableContent) throws -> SCContentFilter {
         guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else {
             throw ScreenshotAppError.mainDisplayUnavailable
         }
@@ -60,7 +73,7 @@ struct ScreenshotCaptureService {
         )
     }
 
-    private func capture(filter: SCContentFilter, sourceRect: CGRect) async throws -> CGImage {
+    private nonisolated func capture(filter: SCContentFilter, sourceRect: CGRect) async throws -> CGImage {
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = sourceRect
         configuration.width = Self.pixelDimension(
@@ -80,7 +93,7 @@ struct ScreenshotCaptureService {
         )
     }
 
-    private static func pixelDimension(points: CGFloat, scale: CGFloat) -> Int {
+    private nonisolated static func pixelDimension(points: CGFloat, scale: CGFloat) -> Int {
         max(1, Int((points * scale).rounded(.toNearestOrAwayFromZero)))
     }
 }

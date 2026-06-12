@@ -157,22 +157,52 @@ private struct ScreenshotPreviewPanelView: View {
             }
         )
         .onHover { isHovering in
-            resetAutoCloseTimer()
-            withAnimation(.easeOut(duration: 0.16)) {
-                isHoveringPanel = isHovering
-                if !isHovering {
-                    isShowingActions = false
-                }
-            }
+            handlePanelHoverChange(isHovering)
         }
-        .onAppear(perform: resetAutoCloseTimer)
+        .onAppear(perform: scheduleAutoCloseTimer)
         .onDisappear {
             autoCloseTask?.cancel()
             autoCloseTask = nil
         }
     }
 
+    private func handlePanelHoverChange(_ isHovering: Bool) {
+        withAnimation(.easeOut(duration: 0.16)) {
+            isHoveringPanel = isHovering
+            if !isHovering {
+                isShowingActions = false
+            }
+        }
+
+        if isHovering {
+            pauseAutoCloseTimer()
+        } else {
+            scheduleAutoCloseTimer()
+        }
+    }
+
     private func resetAutoCloseTimer() {
+        if isHoveringPanel || isShowingActions {
+            pauseAutoCloseTimer()
+        } else {
+            scheduleAutoCloseTimer()
+        }
+    }
+
+    private func handleInteractiveHoverChange(_ isHovering: Bool) {
+        if isHovering {
+            pauseAutoCloseTimer()
+        } else {
+            resetAutoCloseTimer()
+        }
+    }
+
+    private func pauseAutoCloseTimer() {
+        autoCloseTask?.cancel()
+        autoCloseTask = nil
+    }
+
+    private func scheduleAutoCloseTimer() {
         autoCloseTask?.cancel()
 
         let nanoseconds = UInt64(previewPreferences.dismissalDelay * 1_000_000_000)
@@ -237,16 +267,17 @@ private struct ScreenshotPreviewPanelView: View {
 
     private var actionMenu: some View {
         Button {
-            resetAutoCloseTimer()
             withAnimation(.easeOut(duration: 0.16)) {
                 isShowingActions.toggle()
             }
+            resetAutoCloseTimer()
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 24, weight: .semibold))
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(ScreenshotPreviewIconButtonStyle())
+        .onHover(perform: handleInteractiveHoverChange)
         .help("Options")
         .overlay(alignment: .bottom) {
             optionsPanel
@@ -261,12 +292,13 @@ private struct ScreenshotPreviewPanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(automationSteps) { step in
                     Button {
-                        resetAutoCloseTimer()
                         onRunAutomationStep(step, record)
                         isShowingActions = false
+                        resetAutoCloseTimer()
                     } label: {
                         Label(step.title, systemImage: step.primaryEventKind.systemImage)
                     }
+                    .onHover(perform: handleInteractiveHoverChange)
                     .help(step.resolvedDetails)
                 }
             }
@@ -290,6 +322,7 @@ private struct ScreenshotPreviewPanelView: View {
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(ScreenshotPreviewIconButtonStyle())
+        .onHover(perform: handleInteractiveHoverChange)
         .help("Close")
     }
 

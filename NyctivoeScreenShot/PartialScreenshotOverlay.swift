@@ -42,6 +42,7 @@ final class PartialScreenshotOverlayController {
         overlayWindow.ignoresMouseEvents = false
         overlayWindow.isOpaque = false
         overlayWindow.level = .screenSaver
+        overlayWindow.animationBehavior = .none
         overlayWindow.isReleasedWhenClosed = false
 
         let overlayView = PartialScreenshotOverlayView(frame: CGRect(origin: .zero, size: screen.frame.size))
@@ -52,9 +53,15 @@ final class PartialScreenshotOverlayController {
         overlayWindow.contentView = overlayView
 
         window = overlayWindow
-        NSApp.activate(ignoringOtherApps: true)
-        overlayWindow.makeKeyAndOrderFront(nil)
-        overlayWindow.makeFirstResponder(overlayView)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+
+            NSApp.activate(ignoringOtherApps: true)
+            overlayWindow.makeKeyAndOrderFront(nil)
+            overlayWindow.makeFirstResponder(overlayView)
+            overlayWindow.displayIfNeeded()
+        }
     }
 
     private func finish(_ selection: PartialScreenshotSelection?) {
