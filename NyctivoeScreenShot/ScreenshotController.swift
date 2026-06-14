@@ -52,6 +52,15 @@ final class ScreenshotController: ObservableObject {
             shortcutRegistrationFailures = applyShortcutPreferences(shortcutPreferences)
         }
     }
+    @Published var automationToastPreferences: AutomationResultToastPreferences {
+        didSet {
+            guard oldValue != automationToastPreferences else {
+                return
+            }
+
+            Self.saveAutomationToastPreferences(automationToastPreferences)
+        }
+    }
     @Published var feedbackPreferences: ScreenshotFeedbackPreferences {
         didSet {
             guard oldValue != feedbackPreferences else {
@@ -87,8 +96,10 @@ final class ScreenshotController: ObservableObject {
     private let shortcutManager = GlobalShortcutManager()
     private let feedbackPerformer = ScreenshotFeedbackPerformer()
     private let previewPanelController = ScreenshotPreviewPanelController()
+    private let automationResultToastController = AutomationResultToastController()
     private var shortcutEventMonitor: Any?
     private var shortcutRegistrationFailures: [GlobalShortcutRegistrationFailure] = []
+    private var permissionRefreshObserver: NSObjectProtocol?
     private var recentCapturesSyncTask: Task<Void, Never>?
     private var captureWarmUpTask: Task<Void, Never>?
     private var didWarmCapturePipeline = false
@@ -120,6 +131,7 @@ final class ScreenshotController: ObservableObject {
         let savedNamingPreferences = Self.loadNamingPreferences()
         let savedStoragePreferences = Self.loadStoragePreferences()
         let savedShortcutPreferences = Self.loadShortcutPreferences()
+        let savedAutomationToastPreferences = Self.loadAutomationToastPreferences()
         let savedFeedbackPreferences = Self.loadFeedbackPreferences()
         let savedPreviewPreferences = Self.loadPreviewPreferences()
         let savedAutomationPreferences = Self.loadAutomationPreferences()
@@ -130,6 +142,7 @@ final class ScreenshotController: ObservableObject {
         namingPreferences = savedNamingPreferences
         storagePreferences = savedStoragePreferences
         shortcutPreferences = savedShortcutPreferences
+        automationToastPreferences = savedAutomationToastPreferences
         feedbackPreferences = savedFeedbackPreferences
         previewPreferences = savedPreviewPreferences
         automationPreferences = savedAutomationPreferences
@@ -152,6 +165,7 @@ final class ScreenshotController: ObservableObject {
         }
 
         feedbackPerformer.prepare(feedbackPreferences)
+        startPermissionAutoRefresh()
         warmUpCapturePipeline()
     }
 
@@ -160,12 +174,17 @@ final class ScreenshotController: ObservableObject {
             NSEvent.removeMonitor(shortcutEventMonitor)
         }
 
+        if let permissionRefreshObserver {
+            NotificationCenter.default.removeObserver(permissionRefreshObserver)
+        }
+
         recentCapturesSyncTask?.cancel()
         captureWarmUpTask?.cancel()
     }
 
     func refreshPermissionStatus() {
         hasScreenRecordingPermission = captureService.hasScreenRecordingPermission
+        warmUpCapturePipeline()
     }
 
     func requestScreenRecordingPermission() {
@@ -309,11 +328,10 @@ final class ScreenshotController: ObservableObject {
             let runner = ScreenshotAutomationRunner(preferences: preferences, handlers: automationHandlers)
             let summary = await runner.run(record: record, step: step)
 
-            guard let statusMessage = summary.statusMessage else {
-                return
+            if let statusMessage = summary.statusMessage {
+                self.statusMessage = statusMessage
             }
-
-            self.statusMessage = statusMessage
+            self.showAutomationResultToast(automationName: step.title, record: record, summary: summary)
         }
     }
 
@@ -369,7 +387,7 @@ final class ScreenshotController: ObservableObject {
             return false
         }
 
-        refreshPermissionStatus()
+        hasScreenRecordingPermission = captureService.hasScreenRecordingPermission
         guard hasScreenRecordingPermission else {
             statusMessage = "Screen Recording permission is required."
             requestScreenRecordingPermission()
@@ -379,6 +397,18 @@ final class ScreenshotController: ObservableObject {
         isCapturing = true
         statusMessage = "Capturing..."
         return true
+    }
+
+    private func startPermissionAutoRefresh() {
+        permissionRefreshObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshPermissionStatus()
+            }
+        }
     }
 
     private func warmUpCapturePipeline() {
@@ -443,11 +473,10 @@ final class ScreenshotController: ObservableObject {
             let runner = ScreenshotAutomationRunner(preferences: preferences, handlers: automationHandlers)
             let summary = await runner.run(record: record)
 
-            guard let statusMessage = summary.statusMessage else {
-                return
+            if let statusMessage = summary.statusMessage {
+                self.statusMessage = statusMessage
             }
-
-            self.statusMessage = statusMessage
+            self.showAutomationResultToast(automationName: "Automations", record: record, summary: summary)
         }
     }
 
@@ -536,6 +565,18 @@ final class ScreenshotController: ObservableObject {
         if shortcutRegistrationFailures.isEmpty {
             statusMessage = "Shortcut updated to \(shortcut.displayText)."
         }
+    }
+
+    private func showAutomationResultToast(
+        automationName: String,
+        record: ScreenshotRecord,
+        summary: ScreenshotAutomationSummary
+    ) {
+        let configuration = summary.didFail ? automationToastPreferences.failure : automationToastPreferences.success
+        automationResultToastController.show(
+            text: configuration.resolvedText(automationName: automationName, record: record, summary: summary),
+            color: configuration.color
+        )
     }
 
     private func stopRecordingShortcut() {
@@ -692,6 +733,37 @@ final class ScreenshotController: ObservableObject {
         defaults.set(Int(preferences.fullScreenShortcut.modifiers.rawValue), forKey: UserDefaultsKey.fullScreenShortcutModifiers)
         defaults.set(Int(preferences.partialShortcut.keyCode), forKey: UserDefaultsKey.partialShortcutKeyCode)
         defaults.set(Int(preferences.partialShortcut.modifiers.rawValue), forKey: UserDefaultsKey.partialShortcutModifiers)
+    }
+
+    private static func loadAutomationToastPreferences() -> AutomationResultToastPreferences {
+        let defaults = UserDefaults.standard
+        let defaultPreferences = AutomationResultToastPreferences.default
+        return AutomationResultToastPreferences(
+            success: AutomationResultToastConfiguration(
+                text: defaults.string(forKey: UserDefaultsKey.automationSuccessToastText)
+                ?? defaultPreferences.success.text,
+                color: defaults
+                    .string(forKey: UserDefaultsKey.automationSuccessToastColor)
+                    .flatMap(AutomationResultToastColor.init(rawValue:))
+                ?? defaultPreferences.success.color
+            ),
+            failure: AutomationResultToastConfiguration(
+                text: defaults.string(forKey: UserDefaultsKey.automationFailureToastText)
+                ?? defaultPreferences.failure.text,
+                color: defaults
+                    .string(forKey: UserDefaultsKey.automationFailureToastColor)
+                    .flatMap(AutomationResultToastColor.init(rawValue:))
+                ?? defaultPreferences.failure.color
+            )
+        )
+    }
+
+    private static func saveAutomationToastPreferences(_ preferences: AutomationResultToastPreferences) {
+        let defaults = UserDefaults.standard
+        defaults.set(preferences.success.text, forKey: UserDefaultsKey.automationSuccessToastText)
+        defaults.set(preferences.success.color.rawValue, forKey: UserDefaultsKey.automationSuccessToastColor)
+        defaults.set(preferences.failure.text, forKey: UserDefaultsKey.automationFailureToastText)
+        defaults.set(preferences.failure.color.rawValue, forKey: UserDefaultsKey.automationFailureToastColor)
     }
 
     private static func loadFeedbackPreferences() -> ScreenshotFeedbackPreferences {
@@ -1051,6 +1123,10 @@ final class ScreenshotController: ObservableObject {
         static let fullScreenShortcutModifiers = "fullScreenShortcutModifiers"
         static let partialShortcutKeyCode = "partialShortcutKeyCode"
         static let partialShortcutModifiers = "partialShortcutModifiers"
+        static let automationSuccessToastText = "automationSuccessToastText"
+        static let automationSuccessToastColor = "automationSuccessToastColor"
+        static let automationFailureToastText = "automationFailureToastText"
+        static let automationFailureToastColor = "automationFailureToastColor"
         static let feedbackPlaysSound = "screenshotFeedbackPlaysSound"
         static let feedbackFlashesScreen = "screenshotFeedbackFlashesScreen"
         static let feedbackSound = "screenshotFeedbackSound"

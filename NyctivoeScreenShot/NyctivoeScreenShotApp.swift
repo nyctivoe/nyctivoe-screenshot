@@ -142,10 +142,7 @@ private struct PermissionOnboardingView: View {
 
                 Button {
                     controller.requestScreenRecordingPermission()
-                    if controller.hasScreenRecordingPermission {
-                        hasCompletedOnboarding = true
-                        dismiss()
-                    }
+                    refreshPermissionState()
                 } label: {
                     Label("Request Permission", systemImage: "lock.open")
                 }
@@ -156,8 +153,18 @@ private struct PermissionOnboardingView: View {
         .frame(width: 460)
         .nyctivoeWindowBackground()
         .onAppear {
-            controller.refreshPermissionStatus()
+            refreshPermissionState()
         }
+    }
+
+    private func refreshPermissionState() {
+        controller.refreshPermissionStatus()
+        guard controller.hasScreenRecordingPermission else {
+            return
+        }
+
+        hasCompletedOnboarding = true
+        dismiss()
     }
 
     private var permissionStatus: some View {

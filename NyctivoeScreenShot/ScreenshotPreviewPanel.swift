@@ -159,11 +159,19 @@ private struct ScreenshotPreviewPanelView: View {
         .onHover { isHovering in
             handlePanelHoverChange(isHovering)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+            if notification.object is ScreenshotPreviewPanelWindow {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isShowingActions = false
+                }
+            }
+        }
         .onAppear(perform: scheduleAutoCloseTimer)
         .onDisappear {
             autoCloseTask?.cancel()
             autoCloseTask = nil
         }
+        .focusEffectDisabled()
     }
 
     private func handlePanelHoverChange(_ isHovering: Bool) {
@@ -228,32 +236,34 @@ private struct ScreenshotPreviewPanelView: View {
             imagePreview
                 .padding(14)
         }
-        .nyctivoeGlassBackgroundEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 14)
+        .nyctivoeGlassBackgroundEffect(in: panelShape)
+        .clipShape(panelShape)
+        .shadow(color: .black.opacity(0.12), radius: 32, x: 0, y: 16)
+        .overlay(
+            panelShape
+                .strokeBorder(.white.opacity(0.28), lineWidth: 1)
+        )
+    }
+
+    private var panelShape: some InsettableShape {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
     }
 
     private var imagePreview: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.62))
-            .overlay {
-                if previewPreferences.showsImagePreview, let image = NSImage(contentsOf: record.url) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Image(systemName: previewPreferences.showsImagePreview ? "photo" : "eye.slash")
-                        .font(.system(size: 34, weight: .regular))
-                        .foregroundStyle(.secondary)
-                }
+        ZStack {
+            if previewPreferences.showsImagePreview, let image = NSImage(contentsOf: record.url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: previewPreferences.showsImagePreview ? "photo" : "eye.slash")
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(.secondary)
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(.separator.opacity(0.32), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
     }
 
     private var centeredControls: some View {
@@ -261,8 +271,6 @@ private struct ScreenshotPreviewPanelView: View {
             actionMenu
             closeButton
         }
-        .opacity(isHoveringPanel || isShowingActions ? 1 : 0)
-        .allowsHitTesting(isHoveringPanel || isShowingActions)
     }
 
     private var actionMenu: some View {
@@ -306,8 +314,12 @@ private struct ScreenshotPreviewPanelView: View {
             .font(.system(size: 12, weight: .medium))
             .padding(7)
             .fixedSize(horizontal: true, vertical: true)
-            .nyctivoeGlassBackgroundEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 8)
+            .nyctivoeGlassBackgroundEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 8)
             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
         }
     }
@@ -345,6 +357,10 @@ private struct ScreenshotPreviewIconButtonStyle: ButtonStyle {
                     Circle()
                         .fill(backgroundColor)
                 )
+                .overlay(
+                    Circle()
+                        .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                )
                 .contentShape(Circle())
                 .onHover { isHovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: isHovering)
@@ -353,10 +369,10 @@ private struct ScreenshotPreviewIconButtonStyle: ButtonStyle {
 
         private var backgroundColor: Color {
             if configuration.isPressed {
-                return Color.primary.opacity(0.14)
+                return Color.primary.opacity(0.10)
             }
 
-            return isHovering ? Color.primary.opacity(0.08) : Color.clear
+            return isHovering ? Color.primary.opacity(0.06) : Color.clear
         }
     }
 }
@@ -376,10 +392,10 @@ private struct ScreenshotPreviewMenuButtonStyle: ButtonStyle {
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(backgroundColor)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .onHover { isHovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: isHovering)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
@@ -387,10 +403,10 @@ private struct ScreenshotPreviewMenuButtonStyle: ButtonStyle {
 
         private var backgroundColor: Color {
             if configuration.isPressed {
-                return Color.primary.opacity(0.16)
+                return Color.primary.opacity(0.12)
             }
 
-            return isHovering ? Color.primary.opacity(0.1) : Color.clear
+            return isHovering ? Color.primary.opacity(0.06) : Color.clear
         }
     }
 }

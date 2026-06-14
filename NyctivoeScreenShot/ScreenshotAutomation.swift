@@ -660,6 +660,7 @@ final class ScreenshotAutomationRunner {
         var messages: [String] = []
         var publicURL: URL?
         var values: [String: String]?
+        var failureCount = 0
 
         for step in steps {
             let context = ScreenshotAutomationContext(record: record, values: values, handlers: handlers)
@@ -672,12 +673,18 @@ final class ScreenshotAutomationRunner {
                         values = context.values
                     }
                 } catch {
+                    failureCount += 1
                     messages.append("\(action.title) failed: \(error.localizedDescription)")
                 }
             }
         }
 
-        return ScreenshotAutomationSummary(messages: messages, publicURL: publicURL, values: values ?? [:])
+        return ScreenshotAutomationSummary(
+            messages: messages,
+            publicURL: publicURL,
+            values: values ?? [:],
+            failureCount: failureCount
+        )
     }
 
     private func actions(for step: ScreenshotAutomationStep) -> [ScreenshotAutomationAction] {
@@ -706,9 +713,14 @@ struct ScreenshotAutomationSummary {
     let messages: [String]
     let publicURL: URL?
     let values: [String: String]
+    let failureCount: Int
 
     var statusMessage: String? {
         messages.last
+    }
+
+    var didFail: Bool {
+        failureCount > 0
     }
 }
 

@@ -169,13 +169,30 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Result Popups") {
+                automationToastConfiguration(
+                    title: "Success",
+                    systemImage: "checkmark.circle.fill",
+                    sampleText: "Upload complete",
+                    text: automationSuccessToastTextBinding,
+                    color: automationSuccessToastColorBinding
+                )
+
+                automationToastConfiguration(
+                    title: "Failure",
+                    systemImage: "xmark.circle.fill",
+                    sampleText: "Upload failed: Supabase is not configured",
+                    text: automationFailureToastTextBinding,
+                    color: automationFailureToastColorBinding
+                )
+            }
         }
         .formStyle(.grouped)
     }
 
     private var shortcutSettings: some View {
         Form {
-            Section {
+            Section("Shortcuts") {
                 shortcutButton(
                     title: "Full Screen",
                     kind: .fullScreen,
@@ -196,6 +213,7 @@ struct SettingsView: View {
                     Label("Reset Shortcuts", systemImage: "arrow.counterclockwise")
                 }
             }
+
         }
         .formStyle(.grouped)
     }
@@ -272,6 +290,81 @@ struct SettingsView: View {
             )
         }
         .disabled(controller.isCapturing)
+    }
+
+    private func automationToastConfiguration(
+        title: String,
+        systemImage: String,
+        sampleText: String,
+        text: Binding<String>,
+        color: Binding<AutomationResultToastColor>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Label(title, systemImage: systemImage)
+                    .foregroundStyle(color.wrappedValue.swiftUIColor)
+                    .font(.headline)
+
+                Spacer()
+
+                colorSwatches(selection: color)
+            }
+
+            TextField("Popup Text", text: text)
+                .textFieldStyle(.roundedBorder)
+
+            AutomationToastPreview(
+                text: automationToastPreviewText(template: text.wrappedValue, fallback: sampleText),
+                color: color.wrappedValue
+            )
+
+            Text("Use {automation}, {message}, {fileName}, or {failures}.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func colorSwatches(selection: Binding<AutomationResultToastColor>) -> some View {
+        HStack(spacing: 6) {
+            ForEach(AutomationResultToastColor.allCases) { toastColor in
+                Button {
+                    selection.wrappedValue = toastColor
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(toastColor.swiftUIColor)
+                            .frame(width: 18, height: 18)
+
+                        if selection.wrappedValue == toastColor {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help(toastColor.label)
+            }
+        }
+    }
+
+    private func automationToastPreviewText(template: String, fallback: String) -> String {
+        let replacements = [
+            "{automation}": "Upload",
+            "{message}": fallback,
+            "{fileName}": "Screenshot.png",
+            "{failures}": "1"
+        ]
+
+        var previewText = template
+        for (placeholder, value) in replacements {
+            previewText = previewText.replacingOccurrences(of: placeholder, with: value)
+        }
+
+        let trimmedText = previewText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedText.isEmpty ? fallback : trimmedText
     }
 
     private func automationStepRow(index: Int) -> some View {
@@ -540,6 +633,38 @@ struct SettingsView: View {
             controller.namingPreferences.includesCaptureKind
         } set: { value in
             controller.namingPreferences.includesCaptureKind = value
+        }
+    }
+
+    private var automationSuccessToastTextBinding: Binding<String> {
+        Binding {
+            controller.automationToastPreferences.success.text
+        } set: { value in
+            controller.automationToastPreferences.success.text = value
+        }
+    }
+
+    private var automationSuccessToastColorBinding: Binding<AutomationResultToastColor> {
+        Binding {
+            controller.automationToastPreferences.success.color
+        } set: { value in
+            controller.automationToastPreferences.success.color = value
+        }
+    }
+
+    private var automationFailureToastTextBinding: Binding<String> {
+        Binding {
+            controller.automationToastPreferences.failure.text
+        } set: { value in
+            controller.automationToastPreferences.failure.text = value
+        }
+    }
+
+    private var automationFailureToastColorBinding: Binding<AutomationResultToastColor> {
+        Binding {
+            controller.automationToastPreferences.failure.color
+        } set: { value in
+            controller.automationToastPreferences.failure.color = value
         }
     }
 
@@ -998,6 +1123,46 @@ struct SettingsView: View {
         } set: { value in
             controller.automationPreferences.copiesSupabasePublicURL = value
         }
+    }
+}
+
+private struct AutomationToastPreview: View {
+    let text: String
+    let color: AutomationResultToastColor
+
+    private let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Circle()
+                .fill(color.swiftUIColor.gradient)
+                .overlay(
+                    Circle().strokeBorder(.white.opacity(0.40), lineWidth: 0.5)
+                )
+                .frame(width: 9, height: 9)
+                .shadow(color: color.swiftUIColor.opacity(0.35), radius: 6)
+
+            Text(text)
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(color.swiftUIColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            Color.clear
+                .nyctivoeGlassEffect(in: shape)
+        }
+        .overlay(
+            shape.strokeBorder(.white.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(shape)
+        .shadow(color: color.swiftUIColor.opacity(0.15), radius: 10, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 6)
     }
 }
 
